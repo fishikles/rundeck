@@ -17,6 +17,8 @@
 import com.dtolabs.rundeck.app.support.QueueQuery
 import com.dtolabs.rundeck.core.authorization.AuthContext
 import com.dtolabs.rundeck.core.authorization.UserAndRolesAuthContext
+import com.dtolabs.rundeck.core.common.Framework
+import com.dtolabs.rundeck.core.common.INodeEntry
 import com.dtolabs.rundeck.core.common.NodeEntryImpl
 import com.dtolabs.rundeck.core.common.NodeSetImpl
 import com.dtolabs.rundeck.core.common.SelectorUtils
@@ -24,9 +26,18 @@ import com.dtolabs.rundeck.core.dispatcher.ContextView
 import com.dtolabs.rundeck.core.dispatcher.DataContextUtils
 import com.dtolabs.rundeck.core.data.SharedDataContextUtils
 import com.dtolabs.rundeck.core.execution.ExecutionContextImpl
+import com.dtolabs.rundeck.core.execution.ExecutionListener
+import com.dtolabs.rundeck.core.execution.dispatch.DispatcherResult
+import com.dtolabs.rundeck.core.execution.workflow.BaseWorkflowExecutor.BaseWorkflowExecutionResult
 import com.dtolabs.rundeck.core.execution.workflow.StepExecutionContext
+import com.dtolabs.rundeck.core.execution.workflow.WorkflowExecutionResult
+import com.dtolabs.rundeck.core.execution.workflow.WorkflowStatusResult
 import com.dtolabs.rundeck.server.authorization.AuthConstants
 import com.dtolabs.rundeck.server.plugins.storage.KeyStorageTree
+import com.dtolabs.rundeck.core.execution.workflow.steps.FailureReason
+import com.dtolabs.rundeck.core.execution.workflow.steps.StepExecutionResultImpl
+import com.dtolabs.rundeck.execution.ExecutionItemFactory
+import com.dtolabs.rundeck.execution.JobRefCommand
 import grails.test.mixin.Mock
 import grails.test.mixin.TestFor
 import org.grails.plugins.metricsweb.MetricService
@@ -2497,5 +2508,230 @@ class ExecutionServiceSpec extends Specification {
         val != null
         val.getNodeService() != null
 
+    }
+
+    def "execute workflow job ref from context"(){
+        given:
+        def jobname = 'abc1'
+        def group = 'path'
+        def project = 'AProject'
+        def nodename = 'node1'
+        ScheduledExecution job = new ScheduledExecution(
+                jobName: jobname,
+                project: project,
+                groupPath: group,
+                description: 'a job',
+                argString: '-args b -args2 d',
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [new CommandExec(
+                                [adhocRemoteString: 'test buddy', argString: '-delay 12 -monkey cheese -particle']
+                        )]
+                ),
+                retry: '1',
+                uuid: 'bd80d431-b70a-42ad-8ea8-37ad4885ea0d'
+        )
+        job.save()
+        Execution e1 = new Execution(
+                project: project,
+                user: 'bob',
+                dateStarted: new Date(),
+                dateEnded: new Date(),
+                status: 'successful'
+
+        )
+        e1.save() != null
+
+        def datacontext = [job:[execid:e1.id], 'option': ['name': 'abc']]
+
+        def sharedContext = SharedDataContextUtils.sharedContext()
+        sharedContext.merge(ContextView.global(), DataContextUtils.context("rarity", ['num': "1"]))
+        sharedContext.merge(ContextView.node(nodename), DataContextUtils.context("rarity", ['num': "2"]))
+
+
+
+        def nodeSet = new NodeSetImpl()
+        def node1 = new NodeEntryImpl(nodename)
+        nodeSet.putNode(node1)
+
+        service.executionUtilService = Mock(ExecutionUtilService)
+        service.storageService = Mock(StorageService)
+        service.jobStateService = Mock(JobStateService)
+        service.frameworkService = Mock(FrameworkService) {
+            authorizeProjectJobAll(*_) >> true
+            filterAuthorizedNodes(_, _, _, _) >> { args ->
+                nodeSet
+            }
+        }
+
+
+        def executionListener = Mock(ExecutionListener)
+
+        def origContext = Mock(StepExecutionContext){
+            getDataContext()>>datacontext
+            getSharedDataContext()>>sharedContext
+            getStepNumber()>>1
+            getStepContext()>>[]
+            getNodes()>> nodeSet
+            getFramework() >> Mock(Framework)
+            getExecutionListener() >> executionListener
+
+        }
+        JobRefCommand item = ExecutionItemFactory.createJobRef(
+                group+'/${option.name}${rarity.num}',
+                ['args', 'args2'] as String[],
+                false,
+                null,
+                true,
+                '.*',
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                project
+        )
+
+
+        service.notificationService = Mock(NotificationService)
+        def dispatcherResult = Mock(DispatcherResult)
+
+        def wresult = Mock(WorkflowExecutionResult){
+            isSuccess()>>true
+        }
+
+
+        service.metricService = Mock(MetricService){
+            withTimer(_,_,_)>>{classname, name,  closure ->
+                wresult
+            }
+        }
+
+        def createFailure = { FailureReason reason, String msg ->
+            return new StepExecutionResultImpl(null, reason, msg)
+        }
+        def createSuccess = {
+            return new StepExecutionResultImpl()
+        }
+        when:
+        def ret = service.runJobRefExecutionItem(origContext,item,createFailure,createSuccess)
+        then:
+        0 * executionListener.log(_)
+        ret.success
+    }
+    def "execute node job ref from context"(){
+        given:
+        def jobname = 'abc2'
+        def group = 'path'
+        def project = 'AProject'
+        def nodename = 'node1'
+        ScheduledExecution job = new ScheduledExecution(
+                jobName: jobname,
+                project: project,
+                groupPath: group,
+                description: 'a job',
+                argString: '-args b -args2 d',
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [new CommandExec(
+                                [adhocRemoteString: 'test buddy', argString: '-delay 12 -monkey cheese -particle']
+                        )]
+                ),
+                retry: '1',
+                uuid: 'bd80d431-b70a-42ad-8ea8-37ad4885ea0d'
+        )
+        job.save()
+        Execution e1 = new Execution(
+                project: project,
+                user: 'bob',
+                dateStarted: new Date(),
+                dateEnded: new Date(),
+                status: 'successful'
+
+        )
+        e1.save() != null
+
+        def datacontext = [job:[execid:e1.id], 'option': ['name': 'abc']]
+
+        def sharedContext = SharedDataContextUtils.sharedContext()
+        sharedContext.merge(ContextView.global(), DataContextUtils.context("rarity", ['num': "1"]))
+        sharedContext.merge(ContextView.node(nodename), DataContextUtils.context("rarity", ['num': "2"]))
+
+
+
+        def nodeSet = new NodeSetImpl()
+        def node1 = new NodeEntryImpl(nodename)
+        nodeSet.putNode(node1)
+        
+        def node = Mock(INodeEntry) {
+            getNodename()>>nodename
+        }
+
+        service.executionUtilService = Mock(ExecutionUtilService)
+        service.storageService = Mock(StorageService)
+        service.jobStateService = Mock(JobStateService)
+        service.frameworkService = Mock(FrameworkService) {
+            authorizeProjectJobAll(*_) >> true
+            filterAuthorizedNodes(_, _, _, _) >> { args ->
+                nodeSet
+            }
+        }
+
+
+        def executionListener = Mock(ExecutionListener)
+
+        def origContext = Mock(StepExecutionContext){
+            getDataContext()>>datacontext
+            getSharedDataContext()>>sharedContext
+            getStepNumber()>>1
+            getStepContext()>>[]
+            getNodes()>> nodeSet
+            getFramework() >> Mock(Framework)
+            getExecutionListener() >> executionListener
+
+        }
+        JobRefCommand item = ExecutionItemFactory.createJobRef(
+                group+'/${option.name}${rarity.num}',
+                ['args', 'args2'] as String[],
+                true,
+                null,
+                true,
+                '.*',
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                project
+        )
+
+
+        service.notificationService = Mock(NotificationService)
+        def dispatcherResult = Mock(DispatcherResult)
+
+        def wresult = Mock(WorkflowExecutionResult){
+            isSuccess()>>true
+        }
+
+
+        service.metricService = Mock(MetricService){
+            withTimer(_,_,_)>>{classname, name,  closure ->
+                wresult
+            }
+        }
+
+        def createFailure = { FailureReason reason, String msg ->
+            return new StepExecutionResultImpl(null, reason, msg)
+        }
+        def createSuccess = {
+            return new StepExecutionResultImpl()
+        }
+        when:
+        def ret = service.runJobRefExecutionItem(origContext,item,createFailure,createSuccess,node)
+        then:
+        0 * executionListener.log(_)
+        ret.success
     }
 }

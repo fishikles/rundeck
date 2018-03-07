@@ -416,6 +416,28 @@ class ExecutionItemFactoryTest {
                                null, null, null, null, false, null)
     }
     @Test
+    public void createJobRef_optionInItentifier(){
+        StepExecutionItem test = ExecutionItemFactory.createJobRef(
+                'monkey/${option.test}',
+                ['args', 'args2'] as String[],
+                false,
+                null,
+                true,
+                null,
+                null,
+                null,
+                null,
+                false,
+                null,
+                null,
+                null
+        )
+        Assert.assertTrue(test instanceof JobExecutionItem)
+        JobExecutionItem testcommand=(JobExecutionItem) test
+        assertJobExecutionItem(testcommand, 'monkey/${option.test}', ['args', 'args2'], false, true,
+                               null, null, null, null, false, null)
+    }
+    @Test
     public void createJobRef_withHandler(){
         StepExecutionItem handler = ExecutionItemFactory.createExecCommand(['a', 'b'] as String[], null, false,
                                                                            null)

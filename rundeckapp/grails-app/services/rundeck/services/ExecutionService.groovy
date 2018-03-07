@@ -3145,17 +3145,40 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
 
         def group = null
         def name = null
-        def m = jitem.jobIdentifier =~ '^/?(.+)/([^/]+)$'
+        def jobIdentifier = jitem.jobIdentifier
+
+        if (executionContext.sharedDataContext) {
+            jobIdentifier = SharedDataContextUtils.replaceDataReferences(
+                    jobIdentifier,
+                    executionContext.sharedDataContext,
+                    node ? ContextView.node(node.nodename) : ContextView.global(),
+                    ContextView.&nodeStep,
+                    null,
+                    false,
+                    false
+            )
+        }
+        def plainOptsContext = executionContext.dataContext['option']?.findAll { !executionContext.dataContext['secureOption'] || null == executionContext.dataContext['secureOption'][it.key] }
+        jobIdentifier = DataContextUtils.replaceDataReferencesInString(
+                jobIdentifier,
+                [option: plainOptsContext],
+                DataContextUtils.replaceMissingOptionsWithBlank,
+                false
+        )
+
+
+        def m = jobIdentifier =~ '^/?(.+)/([^/]+)$'
         if (m.matches()) {
             group = m.group(1)
             name = m.group(2)
         } else {
-            name = jitem.jobIdentifier
+            name = jobIdentifier
         }
+	
         project = project?project:executionContext.getFrameworkProject()
         def schedlist = ScheduledExecution.findAllScheduledExecutions(group, name, project)
         if (!schedlist || 1 != schedlist.size()) {
-            def msg = "Job [${jitem.jobIdentifier}] not found, project: ${project}"
+            def msg = "Job [${jobIdentifier}] not found, project: ${project}"
             executionContext.getExecutionListener().log(0, msg)
             throw new StepException(msg, JobReferenceFailureReason.NotFound)
         }
@@ -3180,7 +3203,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
             }
 
             if (!frameworkService.authorizeProjectJobAll(executionContext.getAuthContext(), se, [AuthConstants.ACTION_RUN], se.project)) {
-                def msg = "Unauthorized to execute job [${jitem.jobIdentifier}}: ${se.extid}"
+                def msg = "Unauthorized to execute job [${jobIdentifier}}: ${se.extid}"
                 executionContext.getExecutionListener().log(0, msg);
                 result = createFailure(JobReferenceFailureReason.Unauthorized, msg)
                 return
@@ -3203,7 +3226,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
                         true
                 )
             } catch (ExecutionServiceValidationException e) {
-                executionContext.getExecutionListener().log(0, "Option input was not valid for [${jitem.jobIdentifier}]: ${e.message}");
+                executionContext.getExecutionListener().log(0, "Option input was not valid for [${jobIdentifier}]: ${e.message}");
                 def msg = "Invalid options: ${e.errors.keySet()}"
                 result = createFailure(JobReferenceFailureReason.InvalidOptions, msg.toString())
             }
@@ -3227,7 +3250,7 @@ class ExecutionService implements ApplicationContextAware, StepExecutor, NodeSte
         }
 
         if (!wresult || !wresult.success) {
-            result = createFailure(JobReferenceFailureReason.JobFailed, "Job [${jitem.jobIdentifier}] failed")
+            result = createFailure(JobReferenceFailureReason.JobFailed, "Job [${jobIdentifier}] failed")
         } else {
             result = createSuccess()
         }
