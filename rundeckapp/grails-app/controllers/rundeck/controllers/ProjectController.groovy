@@ -22,8 +22,10 @@ import com.dtolabs.rundeck.core.authorization.AuthContext
 import com.dtolabs.rundeck.core.authorization.UserAndRolesAuthContext
 import com.dtolabs.rundeck.core.authorization.Validation
 import com.dtolabs.rundeck.core.common.Framework
+import com.dtolabs.rundeck.core.common.FrameworkResource
 import com.dtolabs.rundeck.core.common.IRundeckProject
 import com.dtolabs.rundeck.server.authorization.AuthConstants
+import rundeck.Project
 import rundeck.filters.ApiRequestFilters
 import rundeck.services.ApiService
 import rundeck.services.ArchiveOptions
@@ -520,10 +522,13 @@ class ProjectController extends ControllerBase{
     }
 
     private Map basicProjectDetails(def pject) {
+        final def projectDescription = Project.withNewSession {
+            Project.findByName(pject.name)?.description
+        }
         [
                 url:generateProjectApiUrl(pject.name),
                 name:pject.name,
-                description : pject.hasProperty('project.description') ? pject.getProperty('project.description') : ''
+                description : projectDescription ? projectDescription : ''
         ]
     }
 
@@ -705,6 +710,14 @@ class ProjectController extends ControllerBase{
                             status: HttpServletResponse.SC_BAD_REQUEST,
                             code: "api.error.invalid.request",
                             args: ["Project 'name' is required"],
+                            format: respFormat
+                    ])
+        } else if (!(project =~ FrameworkResource.VALID_RESOURCE_NAME_REGEX)) {
+            return apiService.renderErrorFormat(response,
+                    [
+                            status: HttpServletResponse.SC_BAD_REQUEST,
+                            code: "project.name.can.only.contain.these.characters",
+                            args: [],
                             format: respFormat
                     ])
         }
@@ -1372,7 +1385,10 @@ class ProjectController extends ControllerBase{
 
         switch (respFormat) {
             case 'text':
-                render(contentType: 'text/plain',text: project.propertyFile.text)
+                response.setContentType("text/plain")
+                def props=project.getProjectProperties() as Properties
+                props.store(response.outputStream,request.forwardURI)
+                response.outputStream.close()
                 break
             case 'xml':
                 apiService.renderSuccessXml(request, response) {

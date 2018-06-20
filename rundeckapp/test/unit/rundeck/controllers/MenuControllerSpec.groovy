@@ -19,21 +19,24 @@ package rundeck.controllers
 import com.dtolabs.rundeck.app.support.ProjAclFile
 import com.dtolabs.rundeck.app.support.SaveProjAclFile
 import com.dtolabs.rundeck.app.support.SaveSysAclFile
+import com.dtolabs.rundeck.app.support.ScheduledExecutionQuery
 import com.dtolabs.rundeck.app.support.SysAclFile
 import com.dtolabs.rundeck.core.authorization.AuthorizationUtil
 import com.dtolabs.rundeck.core.authorization.UserAndRolesAuthContext
 import com.dtolabs.rundeck.core.authorization.ValidationSet
-import com.dtolabs.rundeck.core.authorization.providers.Policies
 import com.dtolabs.rundeck.core.authorization.providers.Policy
 import com.dtolabs.rundeck.core.authorization.providers.PolicyCollection
 import com.dtolabs.rundeck.core.common.Framework
 import com.dtolabs.rundeck.core.common.IRundeckProject
 import com.dtolabs.rundeck.core.common.ProjectManager
 import com.dtolabs.rundeck.server.authorization.AuthConstants
+import com.dtolabs.rundeck.server.plugins.DescribedPlugin
 import grails.test.mixin.Mock
 import grails.test.mixin.TestFor
 import org.codehaus.groovy.grails.web.servlet.mvc.SynchronizerTokensHolder
 import rundeck.CommandExec
+import rundeck.Execution
+import rundeck.Project
 import rundeck.ScheduledExecution
 import rundeck.Workflow
 import rundeck.services.ApiService
@@ -41,7 +44,11 @@ import rundeck.services.AuthorizationService
 import rundeck.services.ConfigurationService
 import rundeck.services.FrameworkService
 import rundeck.services.ScheduledExecutionService
+import rundeck.services.ScmService
+import rundeck.services.UserService
 import rundeck.services.authorization.PoliciesValidation
+import rundeck.services.scm.ScmPluginConfig
+import rundeck.services.scm.ScmPluginConfigData
 import spock.lang.Specification
 import spock.lang.Unroll
 
@@ -51,7 +58,7 @@ import javax.servlet.http.HttpServletResponse
  * Created by greg on 3/15/16.
  */
 @TestFor(MenuController)
-@Mock([ScheduledExecution, CommandExec, Workflow])
+@Mock([ScheduledExecution, CommandExec, Workflow, Project, Execution])
 class MenuControllerSpec extends Specification {
     def "api job detail xml"() {
         given:
@@ -77,7 +84,7 @@ class MenuControllerSpec extends Specification {
         1 * controller.apiService.requireExists(_, job1, _) >> true
         1 * controller.frameworkService.getAuthContextForSubjectAndProject(_, 'AProject') >>
                 Mock(UserAndRolesAuthContext)
-        1 * controller.frameworkService.authorizeProjectJobAll(_, job1, ['read'], 'AProject') >> true
+        1 * controller.frameworkService.authorizeProjectJobAny(_, job1, ['read','view'], 'AProject') >> true
         1 * controller.apiService.apiHrefForJob(job1) >> 'api/href'
         1 * controller.apiService.guiHrefForJob(job1) >> 'gui/href'
 
@@ -115,7 +122,7 @@ class MenuControllerSpec extends Specification {
         1 * controller.apiService.requireExists(_, job1, _) >> true
         1 * controller.frameworkService.getAuthContextForSubjectAndProject(_, 'AProject') >>
                 Mock(UserAndRolesAuthContext)
-        1 * controller.frameworkService.authorizeProjectJobAll(_, job1, ['read'], 'AProject') >> true
+        1 * controller.frameworkService.authorizeProjectJobAny(_, job1, ['read','view'], 'AProject') >> true
         1 * controller.apiService.apiHrefForJob(job1) >> 'api/href'
         1 * controller.apiService.guiHrefForJob(job1) >> 'gui/href'
 
@@ -180,7 +187,7 @@ class MenuControllerSpec extends Specification {
         1 * controller.apiService.requireVersion(_, _, 17) >> true
         _ * controller.frameworkService.getServerUUID() >> testUUID
         1 * controller.frameworkService.getAuthContextForSubjectAndProject(_,'AProject') >> Mock(UserAndRolesAuthContext)
-        1 * controller.frameworkService.authorizeProjectJobAll(_,job1,['read'],'AProject')>>true
+        1 * controller.frameworkService.authorizeProjectJobAny(_,job1,['read','view'],'AProject')>>true
         1 * controller.frameworkService.isClusterModeEnabled()>>true
         1 * controller.apiService.renderSuccessXml(_,_,_)
 
@@ -208,7 +215,7 @@ class MenuControllerSpec extends Specification {
         1 * controller.apiService.requireVersion(_, _, 17) >> true
         _ * controller.frameworkService.getServerUUID() >> testUUID
         1 * controller.frameworkService.getAuthContextForSubjectAndProject(_,'AProject') >> Mock(UserAndRolesAuthContext)
-        1 * controller.frameworkService.authorizeProjectJobAll(_,job2,['read'],'AProject')>>true
+        1 * controller.frameworkService.authorizeProjectJobAny(_,job2,['read','view'],'AProject')>>true
         1 * controller.frameworkService.isClusterModeEnabled()>>true
         1 * controller.apiService.renderSuccessXml(_,_,_)
 
@@ -235,12 +242,56 @@ class MenuControllerSpec extends Specification {
         def result = controller.jobsAjax()
 
         then:
+        1 * controller.frameworkService.authResourceForJob(_) >>
+        [authorized: true, action: AuthConstants.ACTION_READ, resource: job1]
+        1 * controller.frameworkService.authorizeProjectResource(_, _, _, _) >> true
+        1 * controller.frameworkService.authorizeProjectResources(_, _, _, _) >> [[authorized: true,
+                                                                                   action    : AuthConstants.ACTION_READ,
+                                                                                   resource  : [group: job1.groupPath, name: job1.jobName]]]
+        1 * controller.frameworkService.existsFrameworkProject('AProject') >> true
+        1 * controller.apiService.requireExists(_, true, ['project', 'AProject']) >> true
+        1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist: [job1]]
+        1 * controller.scheduledExecutionService.finishquery(_, _, _) >> [max           : 20,
+                                                                          offset        : 0,
+                                                                          paginateParams: [:],
+                                                                          displayParams : [:]]
+        1 * controller.scheduledExecutionService.nextExecutionTimes(_) >> [(job1.id): new Date()]
+        response.json != null
+        response.json.count == 1
+        response.json.jobs
+        response.json.jobs[0].nextScheduledExecution
+        !response.json.jobs[0].futureScheduledExecutions
+    }
+
+    def "api jobsAjax with invalid daysAhead param"() {
+        given:
+        def testUUID = UUID.randomUUID().toString()
+        def testUUID2 = UUID.randomUUID().toString()
+        controller.apiService = Mock(ApiService)
+        controller.frameworkService = Mock(FrameworkService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        ScheduledExecution job1 = new ScheduledExecution(createJobParams(jobName: 'job1', uuid: testUUID))
+        job1.serverNodeUUID = testUUID2
+        job1.totalTime = 200 * 1000
+        job1.execCount = 100
+        job1.save()
+        request.addHeader('x-rundeck-ajax', 'true')
+
+        when:
+        params.id = testUUID
+        params.project = 'AProject'
+        params.daysAhead = daysAhead
+        response.format = 'json'
+        def result = controller.jobsAjax()
+
+        then:
         1 * controller.frameworkService.authResourceForJob(_) >> [authorized:true, action:AuthConstants.ACTION_READ,resource:job1]
         1 * controller.frameworkService.authorizeProjectResource(_,_,_,_) >> true
-        1 * controller.frameworkService.authorizeProjectResources(_,_,_,_) >> [ [authorized:true, 
-                                    action:AuthConstants.ACTION_READ,
-                                    resource:[group:job1.groupPath,name:job1.jobName]] ]
+        1 * controller.frameworkService.authorizeProjectResources(_, _, _, _) >> [[authorized: true,
+                                                                                   action    :AuthConstants.ACTION_READ,
+                                                                                   resource  :[group:job1.groupPath,name:job1.jobName]] ]
         1 * controller.frameworkService.existsFrameworkProject('AProject') >> true
+        1 * controller.apiService.requireExists(_,true,['project','AProject']) >> true
         1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist : [job1]]
         1 * controller.scheduledExecutionService.finishquery(_,_,_) >> [max: 20,
                                                                         offset:0,
@@ -252,6 +303,11 @@ class MenuControllerSpec extends Specification {
         response.json.jobs
         response.json.jobs[0].nextScheduledExecution
         !response.json.jobs[0].futureScheduledExecutions
+
+        where:
+        daysAhead | _
+        '0'       | _
+        '-1'      | _
     }
 
     def "api jobsAjax with daysAhead param"() {
@@ -285,6 +341,7 @@ class MenuControllerSpec extends Specification {
                                     action:AuthConstants.ACTION_READ,
                                     resource:[group:job1.groupPath,name:job1.jobName]] ]
         1 * controller.frameworkService.existsFrameworkProject('AProject') >> true
+        1 * controller.apiService.requireExists(_,true,['project','AProject']) >> true
         1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist : [job1]]
         1 * controller.scheduledExecutionService.finishquery(_,_,_) >> [max: 20,
                                                                         offset:0,
@@ -296,6 +353,59 @@ class MenuControllerSpec extends Specification {
         response.json.jobs
         response.json.jobs[0].nextScheduledExecution
         response.json.jobs[0].futureScheduledExecutions
+    }
+
+    @Unroll
+    def "api jobsAjax with future param"() {
+        given:
+        def testUUID = UUID.randomUUID().toString()
+        def testUUID2 = UUID.randomUUID().toString()
+        controller.apiService = Mock(ApiService)
+        controller.frameworkService = Mock(FrameworkService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        ScheduledExecution job1 = new ScheduledExecution(createJobParams(jobName: 'job1', uuid: testUUID))
+        job1.serverNodeUUID = testUUID2
+        job1.totalTime = 200 * 1000
+        job1.execCount = 100
+        job1.save()
+        job1.scheduledExecutionService = Mock(ScheduledExecutionService) {
+            createTrigger(_) >> org.quartz.TriggerBuilder.newTrigger().build();
+        }
+        request.addHeader('x-rundeck-ajax', 'true')
+
+        when:
+        params.id = testUUID
+        params.project = 'AProject'
+        params.future = futureParam
+        response.format = 'json'
+        def result = controller.jobsAjax()
+
+        then:
+        1 * controller.frameworkService.authResourceForJob(_) >>
+        [authorized: true, action: AuthConstants.ACTION_READ, resource: job1]
+        1 * controller.frameworkService.authorizeProjectResource(_, _, _, _) >> true
+        1 * controller.frameworkService.authorizeProjectResources(_, _, _, _) >> [[authorized: true,
+                                                                                   action    : AuthConstants.ACTION_READ,
+                                                                                   resource  : [group: job1.groupPath, name: job1.jobName]]]
+        1 * controller.frameworkService.existsFrameworkProject('AProject') >> true
+        1 * controller.apiService.requireExists(_, true, ['project', 'AProject']) >> true
+        1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist: [job1]]
+        1 * controller.scheduledExecutionService.finishquery(_, _, _) >> [max           : 20,
+                                                                          offset        : 0,
+                                                                          paginateParams: [:],
+                                                                          displayParams : [:]]
+        1 * controller.scheduledExecutionService.nextExecutionTimes(_) >> [(job1.id): new Date()]
+        response.json != null
+        response.json.count == 1
+        response.json.jobs
+        response.json.jobs[0].nextScheduledExecution
+        response.json.jobs[0].futureScheduledExecutions
+
+        where:
+        futureParam | _
+        '1h'        | _
+        '2d'        | _
+        '3w'        | _
     }
   
     protected void setupFormTokens(params) {
@@ -760,5 +870,317 @@ class MenuControllerSpec extends Specification {
         result.acllist[0].meta.policies
         result.acllist[0].meta.policies.size == 1
         result.acllist[0].meta.policies[0].description == description
+    }
+
+    def "homeAjax get description field on project table"() {
+        given:
+
+        controller.frameworkService = Mock(FrameworkService)
+        def description = 'desc'
+        new Project(name: 'proj', description: description).save(flush: true)
+        def iproj = Mock(IRundeckProject) {
+            getName() >> 'proj'
+        }
+        def projects = [iproj]
+        controller.configurationService = Mock(ConfigurationService)
+        controller.menuService = Mock(MenuService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+
+        request.addHeader('x-rundeck-ajax', 'true')
+
+        when:
+        controller.homeAjax()
+
+        then:
+        1 * controller.frameworkService.getAuthContextForSubject(_)
+        1 * controller.frameworkService.projectNames(_) >> []
+        1 * controller.frameworkService.projects(_) >> projects
+        0 * iproj.hasProperty('project.description')
+        description == response.json.projects[0].description
+    }
+
+    def "homeAjax dont fail on project not created yet"() {
+        given:
+
+        controller.frameworkService = Mock(FrameworkService)
+        def description = 'desc'
+        //new Project(name: 'proj', description: description).save(flush: true)
+        def iproj = Mock(IRundeckProject) {
+            getName() >> 'proj'
+        }
+        def projects = [iproj]
+        controller.configurationService = Mock(ConfigurationService)
+        controller.menuService = Mock(MenuService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+
+        request.addHeader('x-rundeck-ajax', 'true')
+
+        when:
+        controller.homeAjax()
+
+        then:
+        1 * controller.frameworkService.getAuthContextForSubject(_)
+        1 * controller.frameworkService.projectNames(_) >> []
+        1 * controller.frameworkService.projects(_) >> projects
+        1 * iproj.hasProperty('project.description') >> true
+        1 * iproj.getProperty('project.description') >> description
+        description == response.json.projects[0].description
+    }
+
+    def "homeAjax get description field on properties when is null on table"() {
+        given:
+        def description = 'desc'
+        controller.frameworkService = Mock(FrameworkService)
+        new Project(name: 'proj').save(flush: true)
+        def iproj = Mock(IRundeckProject) {
+            getName() >> 'proj'
+        }
+        def projects = [iproj]
+        controller.configurationService = Mock(ConfigurationService)
+        controller.menuService = Mock(MenuService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+
+        request.addHeader('x-rundeck-ajax', 'true')
+
+        when:
+        controller.homeAjax()
+
+        then:
+        1 * controller.frameworkService.getAuthContextForSubject(_)
+        1 * controller.frameworkService.projectNames(_) >> []
+        1 * controller.frameworkService.projects(_) >> projects
+        1 * iproj.hasProperty('project.description') >> true
+        1 * iproj.getProperty('project.description') >> description
+        description == response.json.projects[0].description
+    }
+    
+    def "list Export"() {
+        given:
+        controller.frameworkService = Mock(FrameworkService)
+        controller.authorizationService = Mock(AuthorizationService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        controller.scmService = Mock(ScmService)
+        def project = 'test'
+        def scmConfig = Mock(ScmPluginConfigData){
+            getEnabled() >> true
+        }
+
+        when:
+        request.method = 'POST'
+        params.project = project
+        controller.listExport()
+        then:
+
+        1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist : []]
+        1 * controller.scheduledExecutionService.finishquery(_,_,_) >> [max: 20,
+                                                                        offset:0,
+                                                                        paginateParams:[:],
+                                                                        displayParams:[:]]
+        1 * controller.frameworkService.authorizeApplicationResourceAny(_, _, [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_EXPORT]) >> true
+        1 * controller.frameworkService.authorizeApplicationResourceAny(_, _, [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_IMPORT]) >> true
+        1 * controller.scmService.projectHasConfiguredExportPlugin(project) >> true
+        1 * controller.scmService.projectHasConfiguredImportPlugin(project) >> false
+        1 * controller.scmService.loadScmConfig(project,'export') >> scmConfig
+
+        response.json
+        response.json.scmExportEnabled
+        !response.json.scmImportEnabled
+    }
+
+    def "initialize scm on ajax call if its cluster"() {
+        given:
+        controller.frameworkService = Mock(FrameworkService){
+            isClusterModeEnabled() >> true
+        }
+        controller.authorizationService = Mock(AuthorizationService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        controller.scmService = Mock(ScmService)
+        def project = 'test'
+        def scmConfig = Mock(ScmPluginConfigData){
+            getEnabled() >> true
+        }
+
+        when:
+        request.method = 'POST'
+        params.project = project
+        controller.listExport()
+        then:
+
+        1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist : []]
+        1 * controller.scheduledExecutionService.finishquery(_,_,_) >> [max: 20,
+                                                                        offset:0,
+                                                                        paginateParams:[:],
+                                                                        displayParams:[:]]
+        1 * controller.frameworkService.authorizeApplicationResourceAny(_, _, [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_EXPORT]) >> true
+        1 * controller.frameworkService.authorizeApplicationResourceAny(_, _, [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_IMPORT]) >> true
+        1 * controller.scmService.projectHasConfiguredExportPlugin(project) >> true
+        1 * controller.scmService.projectHasConfiguredImportPlugin(project) >> false
+        1 * controller.scmService.loadScmConfig(project,'export') >> scmConfig
+        1 * controller.scmService.initProject(project,'export')
+        1 * controller.scmService.initProject(project,'import')
+
+        response.json
+        response.json.scmExportEnabled
+        !response.json.scmImportEnabled
+    }
+
+    def "project Toggle SCM off"(){
+        given:
+        controller.frameworkService = Mock(FrameworkService)
+        controller.authorizationService = Mock(AuthorizationService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        controller.scmService = Mock(ScmService)
+        def project = 'test'
+
+        def type = 'git'
+        def econfig = new ScmPluginConfig(new Properties(), 'prefix')
+        econfig.setType(type)
+        econfig.setEnabled(true)
+
+        def descPlugin = Mock(DescribedPlugin)
+        descPlugin.name >> 'git-export'
+
+        when:
+        request.method = 'POST'
+        params.project = project
+        controller.projectToggleSCM()
+        then:
+        1 * controller.frameworkService.authorizeApplicationResourceAll(_, _, [AuthConstants.ACTION_CONFIGURE, AuthConstants.ACTION_ADMIN]) >> true
+        1 * controller.scmService.loadScmConfig(project, 'export') >> econfig
+        1 * controller.scmService.loadScmConfig(project, 'import')
+
+        1* controller.scmService.projectHasConfiguredPlugin('export', project) >> true
+
+        1 * controller.scmService.getPluginDescriptor('export', type) >> descPlugin
+        1 * controller.scmService.disablePlugin('export', project, 'git-export')
+
+
+        response.status == 302
+    }
+
+    def "project Toggle SCM on"(){
+        given:
+        controller.frameworkService = Mock(FrameworkService)
+        controller.authorizationService = Mock(AuthorizationService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        controller.scmService = Mock(ScmService)
+        def project = 'test'
+
+        def type = 'git'
+        def econfig = new ScmPluginConfig(new Properties(), 'prefix')
+        econfig.setType(type)
+        econfig.setEnabled(false)
+
+        def descPlugin = Mock(DescribedPlugin)
+        descPlugin.name >> 'git-export'
+
+        when:
+        request.method = 'POST'
+        params.project = project
+        controller.projectToggleSCM()
+        then:
+        1 * controller.frameworkService.authorizeApplicationResourceAll(_, _, [AuthConstants.ACTION_CONFIGURE, AuthConstants.ACTION_ADMIN]) >> true
+        1 * controller.scmService.loadScmConfig(project, 'export') >> econfig
+        1 * controller.scmService.loadScmConfig(project, 'import')
+
+        1 * controller.scmService.getPluginDescriptor('export', type) >> descPlugin
+        0 * controller.scmService.disablePlugin(_, project, _)
+        1 * controller.scmService.enablePlugin(_, 'export', project, 'git-export')
+
+
+        response.status == 302
+    }
+
+    def "project Toggle SCM do nothing without configured plugins"(){
+        given:
+        controller.frameworkService = Mock(FrameworkService)
+        controller.authorizationService = Mock(AuthorizationService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        controller.scmService = Mock(ScmService)
+        def project = 'test'
+
+        def type = 'git'
+        def econfig = new ScmPluginConfig(new Properties(), 'prefix')
+        econfig.setType(type)
+        econfig.setEnabled(false)
+
+        def descPlugin = Mock(DescribedPlugin)
+        descPlugin.name >> 'git-export'
+
+        when:
+        request.method = 'POST'
+        params.project = project
+        controller.projectToggleSCM()
+        then:
+        1 * controller.frameworkService.authorizeApplicationResourceAll(_, _, [AuthConstants.ACTION_CONFIGURE, AuthConstants.ACTION_ADMIN]) >> true
+        1 * controller.scmService.loadScmConfig(project, 'export')
+        1 * controller.scmService.loadScmConfig(project, 'import')
+
+        0 * controller.scmService.disablePlugin(_, project, _)
+        0 * controller.scmService.enablePlugin(_, _, project, _)
+
+        response.status == 302
+    }
+
+    def "homeAjax get project label"() {
+        given:
+
+        controller.frameworkService = Mock(FrameworkService)
+        new Project(name: 'proj',description: 'desc').save(flush: true)
+        def iproj = Mock(IRundeckProject) {
+            getName() >> 'proj'
+        }
+        def projects = [iproj]
+        controller.configurationService = Mock(ConfigurationService)
+        controller.menuService = Mock(MenuService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+
+        request.addHeader('x-rundeck-ajax', 'true')
+
+        when:
+        controller.homeAjax()
+
+        then:
+        1 * controller.frameworkService.getAuthContextForSubject(_)
+        1 * controller.frameworkService.projectNames(_) >> []
+        1 * controller.frameworkService.projects(_) >> projects
+        1 * iproj.hasProperty('project.label') >> true
+        1 * iproj.getProperty('project.label') >> 'label'
+        'label' == response.json.projects[0].label
+    }
+
+
+    def "jobs nextSchedListIds"() {
+        given:
+        def testUUID = UUID.randomUUID().toString()
+        controller.frameworkService = Mock(FrameworkService){
+            getRundeckFramework() >> Mock(Framework) {
+                getProjectManager() >> Mock(ProjectManager)
+            }
+        }
+        controller.authorizationService = Mock(AuthorizationService)
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService)
+        controller.scmService = Mock(ScmService)
+        controller.userService = Mock(UserService)
+        def query = new ScheduledExecutionQuery()
+        params.project='test'
+        ScheduledExecution job1 = new ScheduledExecution(createJobParams(jobName: 'job1', uuid:testUUID))
+
+        when:
+        def model = controller.jobs(query)
+        then:
+        1 * controller.frameworkService.authResourceForJob(_) >>
+                [authorized: true, action: AuthConstants.ACTION_READ, resource: job1]
+        1 * controller.frameworkService.authorizeProjectResource(_, _, _, _) >> true
+        1 * controller.frameworkService.authorizeProjectResources(_, _, _, _) >> [[authorized: true,
+                                                                                   action    : AuthConstants.ACTION_READ,
+                                                                                   resource  : [group: job1.groupPath, name: job1.jobName]]]
+        1 * controller.scheduledExecutionService.listWorkflows(_) >> [schedlist: [job1]]
+        1 * controller.scheduledExecutionService.finishquery(_, _, _) >> [max           : 20,
+                                                                          offset        : 0,
+                                                                          paginateParams: [:],
+                                                                          displayParams : [:]]
+        model.nextSchedListIds.size() == model.nextScheduled.size()
+        model.nextSchedListIds.get(0) == model.nextScheduled.get(0).extid
     }
 }

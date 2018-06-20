@@ -20,7 +20,7 @@
 <g:set var="linkParams" value="${filter?filter+projParams:projParams}"/>
 <g:set var="runningParams" value="${filter ? filter + projParams : projParams}"/>
 <g:if test="${scheduledExecution}">
-    <g:set var="linkParams" value="${[jobIdFilter: scheduledExecution.id]+projParams}"/>
+    <g:set var="linkParams" value="${[jobIdFilter: scheduledExecution.id, includeJobRef: includeJobRef]+projParams}"/>
     <g:set var="runningParams" value="${[jobIdFilter: scheduledExecution.extid]+projParams}"/>
 </g:if>
 <ul class="nav nav-tabs activity_links">
@@ -57,7 +57,7 @@
                     title="Executions by you"
                     params="${linkParams+[ userFilter: session.user]}">
                 <i class="glyphicon glyphicon-user"></i>
-                by you
+                <g:message code="by.you" default="by you"/> 
             </g:link>
         </li>
     </g:if>
@@ -68,7 +68,7 @@
                     title="Executions by ${enc(attr:execution.user)}"
                     params="${linkParams+[ userFilter: execution.user]}">
                 <i class="glyphicon glyphicon-user"></i>
-                by <g:username user="${execution.user}"/>
+                <g:message code="by" default="by"/> <g:username user="${execution.user}"/>
             </g:link>
         </li>
     </g:if>
@@ -95,6 +95,9 @@
             </td>
             <td class="eventtitle autoclickable" data-bind="css: { job: isJob(), adhoc: isAdhoc() }">
                 <a href="#" data-bind="text: '#'+executionId(), attr: { href: executionHref() }" class="_defaultAction"></a>
+                <g:if test="${includeJobRef}">
+                    <span data-bind="text: textJobRef('${scheduledExecution.extid}')"></span>
+                </g:if>
                 <g:if test="${showTitle}">
                     <span data-bind="if: !jobDeleted()">
                         <span data-bind="text: isJob()?jobName():executionString()"></span>
@@ -128,7 +131,7 @@
 
                     </span>
                     <span title="">
-                        <span class="text-muted">in</span>
+                        <span class="text-muted"><g:message code="in.of" default="in"/></span>
                         <span class="duration" data-bind="text: durationHumanize()"></span>
                     </span>
                 </span>
@@ -171,7 +174,7 @@
             </td>
 
             <td class="  user text-right autoclickable" style="white-space: nowrap;">
-                <em>by</em>
+                <em><g:message code="by" default="by"/></em>
                 <span data-bind="text: user"></span>
             </td>
 

@@ -474,7 +474,7 @@
 <div class="col-sm-3">
     <div id="formbuttons">
         <g:if test="${!hideCancel}">
-            <g:actionSubmit id="execFormCancelButton" value="Cancel" class="btn btn-default"/>
+            <g:actionSubmit id="execFormCancelButton" value="${g.message(code:'button.action.Cancel',default:'Cancel')}" class="btn btn-default"/>
         </g:if>
         <div class="pull-right">
             <div title="${scheduledExecution.hasExecutionEnabled() ? '':g.message(code: 'disabled.job.run')}"
@@ -527,6 +527,20 @@
                             checked="${defaultFollow || params.follow == 'true'}"
                             value="true"/>
                 <g:message code="job.run.watch.output"/>
+                <select name="followdetail">
+                    <option value="summary" ${(!scheduledExecution.defaultTab || scheduledExecution.defaultTab=='summary')?'selected="selected"':''}>
+                        <g:message code="execution.page.show.tab.Summary.title"/>
+                    </option>
+                    <option value="monitor" ${scheduledExecution.defaultTab=='monitor'?'selected="selected"':''}>
+                        <g:message code="report"/>
+                    </option>
+                    <option value="output" ${scheduledExecution.defaultTab=='output'?'selected="selected"':''}>
+                        <g:message code="execution.show.mode.Log.title"/>
+                    </option>
+                    <option value="definition" ${scheduledExecution.defaultTab=='definition'?'selected="selected"':''}>
+                        <g:message code="definition"/>
+                    </option>
+                </select>
             </label>
         </div>
     </div>
@@ -540,7 +554,7 @@
     <div class="row" >
         <div class="col-sm-12 form-inline" id="formbuttons">
             <g:if test="${!hideCancel}">
-                <g:actionSubmit id="execFormCancelButton" value="Cancel" class="btn btn-default"/>
+                <g:actionSubmit id="execFormCancelButton" value="${g.message(code:'button.action.Cancel',default:'Cancel')}" class="btn btn-default"/>
             </g:if>
             <div title="${scheduledExecution.hasExecutionEnabled() ? '':g.message(code: 'disabled.job.run')}"
                   class="form-group has_tooltip"
@@ -590,6 +604,20 @@
                                 checked="${defaultFollow || params.follow == 'true'}"
                                 value="true"/>
                     <g:message code="job.run.watch.output"/>
+                    <select name="followdetail">
+                        <option value="summary" ${(!scheduledExecution.defaultTab || scheduledExecution.defaultTab=='summary')?'selected="selected"':''}>
+                            <g:message code="execution.page.show.tab.Summary.title"/>
+                        </option>
+                        <option value="monitor" ${scheduledExecution.defaultTab=='monitor'?'selected="selected"':''}>
+                            <g:message code="report"/>
+                        </option>
+                        <option value="output" ${scheduledExecution.defaultTab=='output'?'selected="selected"':''}>
+                            <g:message code="execution.show.mode.Log.title"/>
+                        </option>
+                        <option value="definition" ${scheduledExecution.defaultTab=='definition'?'selected="selected"':''}>
+                            <g:message code="definition"/>
+                        </option>
+                    </select>
                 </label>
             </div>
         </div>

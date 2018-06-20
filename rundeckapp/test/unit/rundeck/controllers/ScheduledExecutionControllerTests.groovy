@@ -34,6 +34,8 @@ import grails.test.mixin.TestFor
 import org.codehaus.groovy.grails.web.servlet.mvc.SynchronizerTokensHolder
 import org.springframework.mock.web.MockMultipartFile
 import org.springframework.mock.web.MockMultipartHttpServletRequest
+import rundeck.JobExec
+import rundeck.ReferencedExecution
 import rundeck.codecs.URIComponentCodec
 import rundeck.services.ApiService
 import rundeck.services.FileUploadService
@@ -64,7 +66,7 @@ import javax.servlet.http.HttpServletResponse
 * $Id$
 */
 @TestFor(ScheduledExecutionController)
-@Mock([ScheduledExecution,Option,Workflow,CommandExec,Execution])
+@Mock([ScheduledExecution,Option,Workflow,CommandExec,Execution,JobExec, ReferencedExecution])
 class ScheduledExecutionControllerTests  {
     /**
      * utility method to mock a class
@@ -1133,10 +1135,11 @@ class ScheduledExecutionControllerTests  {
         }
         sec.frameworkService = mockWith(FrameworkService) {
             getAuthContextForSubjectAndProject(1) { subj,proj -> null }
-            authorizeProjectJobAll(1) { ctx, job, actions, proj ->
+            authorizeProjectJobAny(1) { ctx, job, actions, proj ->
                 assert job == se
                 assert proj == se.project
                 assert 'read' in actions
+                assert 'view' in actions
                 true
             }
         }
@@ -2140,7 +2143,7 @@ class ScheduledExecutionControllerTests  {
 
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
-            authorizeProjectJobAll { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
                 return true
             }
             isClusterModeEnabled{-> false }
@@ -2149,7 +2152,7 @@ class ScheduledExecutionControllerTests  {
             projectNames { _ -> return []}
             projects { return [] }
             authorizeProjectResourceAll { framework, resource, actions, project -> return true }
-            authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getNodeStepPluginDescriptions { [] }
@@ -2234,7 +2237,7 @@ class ScheduledExecutionControllerTests  {
 
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
-            authorizeProjectJobAll { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
                 return true
             }
             isClusterModeEnabled{-> false }
@@ -2250,7 +2253,7 @@ class ScheduledExecutionControllerTests  {
             projectNames { _ -> return []}
             projects { return [] }
             authorizeProjectResourceAll { framework, resource, actions, project -> return true }
-            authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getNodeStepPluginDescriptions { [] }
@@ -2336,7 +2339,7 @@ class ScheduledExecutionControllerTests  {
 
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
-            authorizeProjectJobAll { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
                 return true
             }
             isClusterModeEnabled{-> false }
@@ -2352,7 +2355,7 @@ class ScheduledExecutionControllerTests  {
             projectNames { _ -> return []}
             projects { return [] }
             authorizeProjectResourceAll { framework, resource, actions, project -> return true }
-            authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getNodeStepPluginDescriptions { [] }
@@ -2438,7 +2441,7 @@ class ScheduledExecutionControllerTests  {
 
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
-            authorizeProjectJobAll { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
                 return true
             }
             isClusterModeEnabled{-> false }
@@ -2454,7 +2457,7 @@ class ScheduledExecutionControllerTests  {
             projectNames { _ -> return []}
             projects { return [] }
             authorizeProjectResourceAll { framework, resource, actions, project -> return true }
-            authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getNodeStepPluginDescriptions { [] }
@@ -2539,7 +2542,7 @@ class ScheduledExecutionControllerTests  {
 
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
-            authorizeProjectJobAll { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
                 return true
             }
             isClusterModeEnabled{-> false }
@@ -2555,7 +2558,7 @@ class ScheduledExecutionControllerTests  {
             projectNames { _ -> return []}
             projects { return [] }
             authorizeProjectResourceAll { framework, resource, actions, project -> return true }
-            authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getNodeStepPluginDescriptions { [] }
@@ -2659,7 +2662,7 @@ class ScheduledExecutionControllerTests  {
 
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
-            authorizeProjectJobAll { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
                 return true
             }
             isClusterModeEnabled{-> false }
@@ -2682,7 +2685,7 @@ class ScheduledExecutionControllerTests  {
             projectNames { _ -> return []}
             projects { return [] }
             authorizeProjectResourceAll { framework, resource, actions, project -> return true }
-            authorizeProjectJobAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
             getNodeStepPluginDescriptions { [] }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Rundeck, Inc. (http://rundeck.com)
+ * Copyright 2018 Rundeck, Inc. (http://rundeck.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,6 +70,7 @@ class SizesTest extends Specification {
         "1m"  | 60
         "1h"  | 3600
         "1d"  | 24 * 3600
+        "1w"  | 7 * 24 * 3600
         "1y"  | 365 * 24 * 3600
     }
 
@@ -91,6 +92,9 @@ class SizesTest extends Specification {
         "1d"    | TimeUnit.DAYS    | 1
         "2d"    | TimeUnit.DAYS    | 2
         "2000d" | TimeUnit.DAYS    | 2000
+        "1w"    | TimeUnit.DAYS    | 7
+        "2w"    | TimeUnit.DAYS    | 14
+        "2000w" | TimeUnit.DAYS    | 14000
         "1y"    | TimeUnit.SECONDS | 365 * 24 * 3600
         "1y"    | TimeUnit.DAYS    | 365
         "2y"    | TimeUnit.DAYS    | 2 * 365

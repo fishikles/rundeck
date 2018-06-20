@@ -173,6 +173,7 @@ function getCurSEID(){
             ko.applyBindings(nodeFilter,jQuery('#nodegroupitem')[0]);
             registerNodeFilters(nodeFilter, '#nodegroupitem');
             nodeSummary.reload();
+            nodeFilter.updateMatchedNodes();
             jQuery('body').on('click', '.nodefilterlink', function (evt) {
                 evt.preventDefault();
                 handleNodeFilterLink(this);
@@ -502,7 +503,11 @@ function getCurSEID(){
             <div class="${fieldColSize}">
 
                 <div  id="editoptssect" class="rounded">
-                    <g:render template="/scheduledExecution/detailsOptions" model="${[options:scheduledExecution?.options,edit:true]}"/>
+                    <%
+                        def tmpse = ScheduledExecution.get(scheduledExecution.id)
+                        def options = tmpse?tmpse.options:scheduledExecution.options
+                    %>
+                    <g:render template="/scheduledExecution/detailsOptions" model="${[options:options,edit:true]}"/>
                     <g:if test="${scheduledExecution && scheduledExecution.argString}">
                         <g:render template="/execution/execArgString" model="[argString: scheduledExecution.argString]"/>
                     </g:if>
@@ -704,7 +709,7 @@ function getCurSEID(){
             </div>
         </div>
 
-        <div class="form-group ${hasErrors(bean: scheduledExecution, field: 'nodeThreadcount', 'has-error')}">
+        <div class="form-group ${hasErrors(bean: scheduledExecution, field: 'nodeThreadcountDynamic', 'has-error')}">
             <label for="schedJobnodeThreadcount" class="${labelColClass}">
                 <g:message code="scheduledExecution.property.nodeThreadcount.label"/>
             </label>
@@ -712,16 +717,16 @@ function getCurSEID(){
             <div class="${fieldColSize}">
                 <div class="row">
                 <div class="col-sm-4">
-                <input type='number' name="nodeThreadcount"
-                       value="${enc(attr:scheduledExecution?.nodeThreadcount)}" id="schedJobnodeThreadcount"
+                <input type='text' name="nodeThreadcountDynamic"
+                       value="${enc(attr:scheduledExecution?.nodeThreadcountDynamic)}" id="schedJobnodeThreadcount"
                        size="3"
                        class="form-control input-sm"/>
                 </div>
                 </div>
-                <g:hasErrors bean="${scheduledExecution}" field="nodeThreadcount">
+                <g:hasErrors bean="${scheduledExecution}" field="nodeThreadcountDynamic">
                     <div class="text-warning">
                         <i class="glyphicon glyphicon-warning-sign"></i>
-                        <g:renderErrors bean="${scheduledExecution}" as="list" field="nodeThreadcount"/>
+                        <g:renderErrors bean="${scheduledExecution}" as="list" field="nodeThreadcountDynamic"/>
                     </div>
                 </g:hasErrors>
                 <span class="help-block">
@@ -1146,6 +1151,46 @@ function getCurSEID(){
         </div>
     </div>
 
+    %{--default exec tab--}%
+    <div class="form-group">
+        <div class="${labelColSize} control-label text-form-label">
+            <g:message code="scheduledExecution.property.defaultTab.label"/>
+        </div>
+
+        <div class="${fieldColSize}">
+            <label class="radio-inline">
+                <g:radio value="summary" name="defaultTab"
+                         checked="${!scheduledExecution.defaultTab || scheduledExecution.defaultTab=='summary'}"
+                         id="tabSummary"/>
+                <g:message code="execution.page.show.tab.Summary.title"/>
+            </label>
+
+            <label class="radio-inline">
+                <g:radio name="defaultTab" value="monitor"
+                         checked="${scheduledExecution.defaultTab=='monitor'}"
+                         id="tabMonitor"/>
+                <g:message code="report"/>
+            </label>
+
+            <label class="radio-inline">
+                <g:radio name="defaultTab" value="output"
+                         checked="${scheduledExecution.defaultTab=='output'}"
+                         id="tabOutput"/>
+                <g:message code="execution.show.mode.Log.title"/>
+            </label>
+
+            <label class="radio-inline">
+                <g:radio name="defaultTab" value="definition"
+                         checked="${scheduledExecution.defaultTab=='definition'}"
+                         id="tabDefinition"/>
+                <g:message code="definition"/>
+            </label>
+
+            <span class="help-block">
+                <g:message code="scheduledExecution.property.defaultTab.description"/>
+            </span>
+        </div>
+    </div>
 
     %{--uuid--}%
     <div class="form-group ${hasErrors(bean: scheduledExecution, field: 'uuid', 'has-error')}" id="schedJobUuidLabel">

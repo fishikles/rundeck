@@ -43,6 +43,12 @@
 </div>
     <div class="list-group-item">
         <div class="form-group ">
+            <label for="label">
+                <g:message code="domain.Project.label.label" default="Label"/>
+            </label>
+            <g:textField name="label" size="50"  value="${projectLabel}" class="form-control"/>
+        </div>
+        <div class="form-group ">
             <label for="description">
                 <g:message code="domain.Project.description.label" default="Description"/>
             </label>
@@ -58,6 +64,7 @@
         <g:render template="projectConfigurableForm"
                   model="${[extraConfigSet: extraConfig?.values(),
                             category      : category,
+                            categoryPrefix     : 'extra.category.' + category + '.',
                             titleCode     : 'project.configuration.extra.category.' + category + '.title',
                             helpCode      : 'project.configuration.extra.category.' + category + '.description'
                   ]}"/>

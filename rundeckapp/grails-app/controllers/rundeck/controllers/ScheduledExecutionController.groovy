@@ -89,11 +89,19 @@ class ScheduledExecutionController  extends ControllerBase{
     public static final String ONFAILURE_TRIGGER_NAME = 'onfailure'
     public static final String ONSTART_TRIGGER_NAME = 'onstart'
     public static final String OVERAVGDURATION_TRIGGER_NAME = 'onavgduration'
+    public static final String ONRETRYABLEFAILURE_TRIGGER_NAME = 'onretryablefailure'
     public static final String NOTIFY_OVERAVGDURATION_EMAIL = 'notifyAvgDurationEmail'
     public static final String NOTIFY_OVERAVGDURATION_URL = 'notifyAvgDurationUrl'
     public static final String NOTIFY_ONOVERAVGDURATION_URL = 'notifyOnAvgDurationUrl'
     public static final String NOTIFY_OVERAVGDURATION_RECIPIENTS = 'notifyAvgDurationRecipients'
     public static final String NOTIFY_OVERAVGDURATION_SUBJECT = 'notifyAvgDurationSubject'
+    public static final String NOTIFY_ONRETRYABLEFAILURE_URL = 'notifyOnRetryableFailureUrl'
+    public static final String NOTIFY_ONRETRYABLEFAILURE_EMAIL = 'notifyOnRetryableFailureEmail'
+    public static final String NOTIFY_RETRYABLEFAILURE_EMAIL = 'notifyRetryableFailureEmail'
+    public static final String NOTIFY_RETRYABLEFAILURE_URL = 'notifyRetryableFailureUrl'
+    public static final String NOTIFY_RETRYABLEFAILURE_RECIPIENTS = 'notifyRetryableFailureRecipients'
+    public static final String NOTIFY_RETRYABLEFAILURE_SUBJECT = 'notifyRetryableFailureSubject'
+    public static final String NOTIFY_RETRYABLEFAILURE_ATTACH= 'notifyFailureAttach'
 
     public static final String EMAIL_NOTIFICATION_TYPE = 'email'
     public static final String WEBHOOK_NOTIFICATION_TYPE = 'url'
@@ -105,8 +113,12 @@ class ScheduledExecutionController  extends ControllerBase{
             NOTIFY_ONSTART_EMAIL,
             NOTIFY_ONSTART_URL,
             NOTIFY_OVERAVGDURATION_EMAIL,
-            NOTIFY_ONOVERAVGDURATION_URL
+            NOTIFY_ONOVERAVGDURATION_URL,
+            NOTIFY_ONRETRYABLEFAILURE_EMAIL,
+            NOTIFY_ONRETRYABLEFAILURE_URL
     ]
+
+    public final String REMOTE_OPTION_DISABLE_JSON_CHECK = 'project.jobs.disableRemoteOptionJsonCheck'
 
     def Scheduler quartzScheduler
     def ExecutionService executionService
@@ -162,7 +174,8 @@ class ScheduledExecutionController  extends ControllerBase{
             apiRunCommandv14             : ['POST', 'GET'],
             apiJobDeleteBulk             : ['DELETE', 'POST'],
             apiJobClusterTakeoverSchedule: 'PUT',
-            apiJobUpdateSingle           : 'PUT'
+            apiJobUpdateSingle           : 'PUT',
+            apiJobRetry                  : 'POST'
     ]
 
     def cancel (){
@@ -238,15 +251,15 @@ class ScheduledExecutionController  extends ControllerBase{
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
         if (!unauthorizedResponse(
-                frameworkService.authorizeProjectJobAll(
-                        authContext,
-                        scheduledExecution,
-                        [AuthConstants.ACTION_READ],
-                        scheduledExecution.project
+            frameworkService.authorizeProjectJobAny(
+                authContext,
+                scheduledExecution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+                scheduledExecution.project
                 ),
-                AuthConstants.ACTION_READ,
-                'Job',
-                params.id
+            AuthConstants.ACTION_VIEW,
+            'Job',
+            params.id
             )
         ) {
 
@@ -331,8 +344,15 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
-        if(unauthorizedResponse(frameworkService.authorizeProjectJobAll(authContext, scheduledExecution,
-                [AuthConstants.ACTION_READ], scheduledExecution.project), AuthConstants.ACTION_READ,'Job',params.id)){
+        if (unauthorizedResponse(
+            frameworkService.authorizeProjectJobAny(
+                authContext, scheduledExecution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+                scheduledExecution.project
+            ),
+            AuthConstants.ACTION_VIEW,
+            'Job', params.id
+        )) {
             return
         }
         def model=jobDetailData()
@@ -346,8 +366,14 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
-        if(unauthorizedResponse(frameworkService.authorizeProjectJobAll(authContext, scheduledExecution,
-                [AuthConstants.ACTION_READ], scheduledExecution.project), AuthConstants.ACTION_READ,'Job',params.id)){
+        if (unauthorizedResponse(
+            frameworkService.authorizeProjectJobAny(
+                authContext, scheduledExecution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+                scheduledExecution.project
+            ),
+            AuthConstants.ACTION_VIEW, 'Job', params.id
+        )) {
             return
         }
         def model = jobDetailData(['total', 'nextExecution', 'max', 'scheduledExecution'])
@@ -388,8 +414,17 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
-        if (unauthorizedResponse(frameworkService.authorizeProjectJobAll(authContext, scheduledExecution,
-                [AuthConstants.ACTION_READ], scheduledExecution.project), AuthConstants.ACTION_READ, 'Job', params.id)) {
+        def actions = [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW]
+        if (response.format in ['xml', 'yaml']) {
+            actions = [AuthConstants.ACTION_READ]
+        }
+        if (unauthorizedResponse(
+            frameworkService.authorizeProjectJobAny(
+                authContext, scheduledExecution,
+                actions,
+                scheduledExecution.project
+            ), AuthConstants.ACTION_READ, 'Job', params.id
+        )) {
             return
         }
 
@@ -406,6 +441,10 @@ class ScheduledExecutionController  extends ControllerBase{
         def total = Execution.withTransaction([isolationLevel: isolationLevel]) {
             Execution.countByScheduledExecution(scheduledExecution)
         }
+        def reftotal = 0
+        if(scheduledExecution.refExecCount) {
+            reftotal = scheduledExecution.refExecCount
+        }
 
         def remoteClusterNodeUUID=null
         if (scheduledExecution.scheduled && frameworkService.isClusterModeEnabled()) {
@@ -413,11 +452,17 @@ class ScheduledExecutionController  extends ControllerBase{
         }
 
 
+        def parentList = ReferencedExecution.parentList(scheduledExecution,10)
+        def isReferenced = parentList?.size()>0
+
         def dataMap= [
                 scheduledExecution: scheduledExecution,
+                isReferenced: isReferenced,
+                parentList: parentList,
                 crontab: crontab,
                 params: params,
                 total: total,
+                reftotal: reftotal,
                 nextExecution: scheduledExecutionService.nextExecutionTime(scheduledExecution),
                 remoteClusterNodeUUID: remoteClusterNodeUUID,
                 serverNodeUUID: frameworkService.isClusterModeEnabled()?frameworkService.serverUUID:null,
@@ -437,7 +482,7 @@ class ScheduledExecutionController  extends ControllerBase{
                                                              [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_EXPORT])) {
             if(scmService.projectHasConfiguredExportPlugin(params.project)){
                 dataMap.scmExportEnabled = true
-                dataMap.scmExportStatus = scmService.exportStatusForJobs([scheduledExecution])
+                dataMap.scmExportStatus = scmService.exportStatusForJob(scheduledExecution)
                 dataMap.scmExportRenamedPath=scmService.getRenamedJobPathsForProject(params.project)?.get(scheduledExecution.extid)
             }
         }
@@ -504,8 +549,13 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
-        if (unauthorizedResponse(frameworkService.authorizeProjectJobAll(authContext, scheduledExecution,
-                [AuthConstants.ACTION_READ], scheduledExecution.project), AuthConstants.ACTION_READ, 'Job', params.id)) {
+        if (unauthorizedResponse(
+            frameworkService.authorizeProjectJobAny(
+                authContext, scheduledExecution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+                scheduledExecution.project
+            ), AuthConstants.ACTION_VIEW, 'Job', params.id
+        )) {
             return
         }
 
@@ -557,18 +607,25 @@ class ScheduledExecutionController  extends ControllerBase{
                 scheduledExecution.project
         )
         if (unauthorizedResponse(
-                frameworkService.authorizeProjectJobAll(
+                frameworkService.authorizeProjectJobAny(
                         authContext,
                         scheduledExecution,
-                        [AuthConstants.ACTION_READ],
+                        [AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW],
                         scheduledExecution.project
                 ),
-                AuthConstants.ACTION_READ, 'Job', params.id
+                AuthConstants.ACTION_VIEW, 'Job', params.id
         )) {
             return
         }
         def maxDepth=3
-        def wfdata=scheduledExecutionService.getWorkflowDescriptionTree(scheduledExecution.project,scheduledExecution.workflow,maxDepth)
+
+        def readAuth = frameworkService.authorizeProjectJobAny(
+            authContext,
+            scheduledExecution,
+            [AuthConstants.ACTION_READ],
+            scheduledExecution.project
+        )
+        def wfdata=scheduledExecutionService.getWorkflowDescriptionTree(scheduledExecution.project,scheduledExecution.workflow,readAuth,maxDepth)
         withFormat {
             json {
                 render(contentType: 'application/json') {
@@ -625,8 +682,13 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
-        if (unauthorizedResponse(frameworkService.authorizeProjectJobAll(authContext, scheduledExecution,
-                [AuthConstants.ACTION_READ], scheduledExecution.project), AuthConstants.ACTION_READ, 'Job', params.id)) {
+        if (unauthorizedResponse(
+            frameworkService.authorizeProjectJobAny(
+                authContext, scheduledExecution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+                scheduledExecution.project
+            ), AuthConstants.ACTION_VIEW, 'Job', params.id
+        )) {
             return
         }
         if(!params.option){
@@ -729,7 +791,11 @@ class ScheduledExecutionController  extends ControllerBase{
                     }
                 }
                 try {
-                    remoteResult = getRemoteJSON(srcUrl, timeout, contimeout, retryCount)
+                    def framework = frameworkService.getRundeckFramework()
+                    def projectConfig = framework.projectManager.loadProjectConfig(scheduledExecution.project)
+                    boolean disableRemoteOptionJsonCheck= projectConfig.hasProperty(REMOTE_OPTION_DISABLE_JSON_CHECK)
+
+                    remoteResult = getRemoteJSON(srcUrl, timeout, contimeout, retryCount,disableRemoteOptionJsonCheck)
                     result=remoteResult.json
                     if(remoteResult.stats){
                         remoteStats.putAll(remoteResult.stats)
@@ -977,7 +1043,7 @@ class ScheduledExecutionController  extends ControllerBase{
      * @return Map of data, [json: parsed json or null, stats: stats data, error: error message]
      *
      */
-    private Object getRemoteJSON(String url, int timeout, int contimeout, int retry=5){
+    private Object getRemoteJSON(String url, int timeout, int contimeout, int retry=5,boolean disableRemoteOptionJsonCheck=false){
         log.debug("getRemoteJSON: "+url+", timeout: "+timeout+", retry: "+retry)
         //attempt to get the URL JSON data
         def stats=[:]
@@ -1047,7 +1113,14 @@ class ScheduledExecutionController  extends ControllerBase{
                         type = type.substring(0, type.indexOf(";")).trim();
                     }
 
-                    if (expectedContentType.equals(type)) {
+                    boolean continueRendering=true
+
+                    if(!disableRemoteOptionJsonCheck &&
+                       !expectedContentType.equals(type)){
+                        continueRendering=false
+                    }
+
+                    if (continueRendering) {
                         final stream = method.getResponseBodyAsStream()
                         final writer = new StringWriter()
                         int len=copyToWriter(new BufferedReader(new InputStreamReader(stream, method.getResponseCharSet())),writer)
@@ -1338,6 +1411,7 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         if(request.method=='POST') {
+            def isReferenced = ReferencedExecution.parentList(scheduledExecution,1)?.size()>0
             withForm {
                 def result = scheduledExecutionService.deleteScheduledExecutionById(
                         jobid,
@@ -1351,6 +1425,14 @@ class ScheduledExecutionController  extends ControllerBase{
                 } else {
                     def project = result.success.job ? result.success.job.project : params.project
                     flash.bulkJobResult = [success: [result.success]]
+                    if(isReferenced){
+                        def err = [
+                                message: g.message(code: 'deleted.referenced.job'),
+                                errorCode: 'jobref',
+                                id: jobid
+                        ]
+                        flash.bulkJobResult+=[errors:[err]]
+                    }
                     redirect(controller: 'menu', action: 'jobs', params: [project: project])
                 }
             }.invalidToken {
@@ -2152,9 +2234,12 @@ class ScheduledExecutionController  extends ControllerBase{
         )) {
             return
         }
-        if (unauthorizedResponse(frameworkService.authorizeProjectExecutionAll(authContext, execution,
-                [AuthConstants.ACTION_READ]), AuthConstants.ACTION_READ, 'Execution',
-                params.executionId)) {
+        if (unauthorizedResponse(
+            frameworkService.authorizeProjectExecutionAny(
+                authContext, execution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW]
+            ), AuthConstants.ACTION_VIEW, 'Execution',
+            params.executionId)) {
             return
         }
         def props=[:]
@@ -2831,7 +2916,11 @@ class ScheduledExecutionController  extends ControllerBase{
             }else{
                 delegate.success=true
                 delegate.id=results.id
-                delegate.href=createLink(controller: "execution",action: "follow",id: results.id)
+                if(params.followdetail){
+                    delegate.href=createLink(controller: "execution",action: "follow",id: results.id, fragment: params.followdetail)
+                }else{
+                    delegate.href=createLink(controller: "execution",action: "follow",id: results.id)
+                }
                 delegate.follow=(params.follow == 'true')
             }
         }
@@ -2867,7 +2956,11 @@ class ScheduledExecutionController  extends ControllerBase{
             } else {
                 delegate.success = true
                 delegate.id = results.id
-                delegate.href = createLink(controller: "execution", action: "follow", id: results.id)
+                if(params.followdetail){
+                    delegate.href=createLink(controller: "execution",action: "follow",id: results.id, fragment: params.followdetail)
+                }else{
+                    delegate.href = createLink(controller: "execution", action: "follow", id: results.id)
+                }
                 delegate.follow = (params.follow == 'true')
             }
         }
@@ -2911,7 +3004,7 @@ class ScheduledExecutionController  extends ControllerBase{
             }
             return renderErrorView(results)
         } else if (params.follow == 'true') {
-            redirect(controller: "execution", action: "follow", id: results.id)
+            redirect(controller: "execution", action: "follow", id: results.id, params:[outdetails: params.followdetail])
         } else {
             redirect(controller: "scheduledExecution", action: "show", id: params.id)
         }
@@ -3537,6 +3630,61 @@ class ScheduledExecutionController  extends ControllerBase{
         }
     }
 
+    def apiJobRetry() {
+        if (!apiService.requireVersion(request, response, ApiRequestFilters.V24)) {
+            return
+        }
+        String jobId = params.id
+        String execId = params.executionId
+        String failedOnly = 'true'
+
+        Execution e = Execution.get(execId)
+        if(e?.scheduledExecution?.extid != jobId){
+            e = null
+        }
+        if (!apiService.requireExists(response, e, ['Execution ID', execId])) {
+            return
+        }
+        if (!apiService.requireExists(response, e.failedNodeList, ['Failed node List for execution ID', execId])) {
+            return
+        }
+
+        if (request.format == 'json') {
+            failedOnly = request.JSON.failedNodes?:'true'
+            request.JSON.asUser = request.JSON.asUser?:e.user
+            request.JSON.loglevel = request.JSON.loglevel?:e.loglevel
+            if(request.JSON.options){
+                def map = FrameworkService.parseOptsFromString(e.argString)
+                map.each{k,v ->
+                    if(!request.JSON.options.containsKey(k)){
+                        request.JSON.options.put(k,v)
+                    }
+                }
+            }else if(!request.JSON.argString){
+                request.JSON.argString = request.JSON.argString?:e.argString
+            }
+        }else{
+            failedOnly = params.failedNodes?:'true'
+            params.asUser=params.asUser?:e.user
+            params.loglevel=params.loglevel?:e.loglevel
+            if(params.option){
+                def map = FrameworkService.parseOptsFromString(e.argString)
+                map.each{k,v ->
+                    if(!params.option.containsKey(k)){
+                        params.option.put(k,v)
+                    }
+                }
+            }else if(!params.argString){
+                params.argString = params.argString?:e.argString
+            }
+        }
+        if(failedOnly == 'true'){
+            params.name=e.failedNodeList
+        }
+
+        apiJobRun()
+    }
+
     /**
      * API v19, File upload input for job
      * @return
@@ -3729,8 +3877,13 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject, job.project)
-        if (!frameworkService.authorizeProjectJobAll(authContext, job, [AuthConstants.ACTION_READ], job.project)) {
-            return apiService.renderUnauthorized(response, ['Read', 'Job File Record', params.id])
+        if (!frameworkService.authorizeProjectJobAny(
+            authContext,
+            job,
+            [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+            job.project
+        )) {
+            return apiService.renderUnauthorized(response, [AuthConstants.ACTION_VIEW, 'Job File Record', params.id])
         }
 
         respond(new JobFileInfo(jobFileRecord.exportMap()), [formats: ['xml', 'json']])
@@ -3757,8 +3910,13 @@ class ScheduledExecutionController  extends ControllerBase{
             return
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject, job.project)
-        if (!frameworkService.authorizeProjectJobAll(authContext, job, [AuthConstants.ACTION_READ], job.project)) {
-            return apiService.renderUnauthorized(response, ['Read', 'Job ID', params.id])
+        if (!frameworkService.authorizeProjectJobAny(
+            authContext,
+            job,
+            [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+            job.project
+        )) {
+            return apiService.renderUnauthorized(response, [AuthConstants.ACTION_VIEW, 'Job ID', params.id])
         }
 
         def paging = [offset: 0, max: 20, sort: 'dateCreated', order: 'desc']
@@ -4148,11 +4306,11 @@ class ScheduledExecutionController  extends ControllerBase{
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,scheduledExecution.project)
 
-        if (!frameworkService.authorizeProjectJobAll(
-                authContext,
-                scheduledExecution,
-                [AuthConstants.ACTION_READ],
-                scheduledExecution.project
+        if (!frameworkService.authorizeProjectJobAny(
+            authContext,
+            scheduledExecution,
+            [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+            scheduledExecution.project
         )
         ) {
 

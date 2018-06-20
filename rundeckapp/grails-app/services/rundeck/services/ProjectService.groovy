@@ -41,6 +41,7 @@ import rundeck.BaseReport
 import rundeck.ExecReport
 import rundeck.Execution
 import rundeck.JobFileRecord
+import rundeck.Project
 import rundeck.ScheduledExecution
 import rundeck.codecs.JobsXMLCodec
 import rundeck.controllers.JobXMLException

@@ -143,7 +143,7 @@ class ExecutionUtilService {
                 workflow.commands.collect {
                     itemForWFCmdItem(
                             it,
-                            it.errorHandler ? itemForWFCmdItem(it.errorHandler) : null,
+                            it.errorHandler ? itemForWFCmdItem(it.errorHandler,null,parentProject) : null,
                             parentProject
                     )
                 },
@@ -234,16 +234,16 @@ class ExecutionUtilService {
         }else if (step instanceof JobExec || step.instanceOf(JobExec)) {
             final JobExec jobcmditem = step as JobExec;
 
-            final String[] args;
+            final String[] args
             if (null != jobcmditem.getArgString()) {
                 final List<String> strings = OptsUtil.burst(jobcmditem.getArgString());
                 args = strings.toArray(new String[strings.size()]);
             } else {
                 args = new String[0];
             }
-
+            def tmpProj = jobcmditem.jobProject
             if(!jobcmditem.jobProject && parentProject){
-                jobcmditem.jobProject = parentProject
+                tmpProj = parentProject
             }
             return ExecutionItemFactory.createJobRef(
                     jobcmditem.getJobIdentifier(),
@@ -258,7 +258,10 @@ class ExecutionUtilService {
                     jobcmditem.nodeRankOrderAscending,
                     step.description,
                     jobcmditem.nodeIntersect,
-                    jobcmditem.jobProject
+                    tmpProj,
+                    jobcmditem.failOnDisable,
+                    jobcmditem.importOptions,
+                    jobcmditem.uuid
             )
         }else if(step instanceof PluginStep || step.instanceOf(PluginStep)){
             final PluginStep stepitem = step as PluginStep

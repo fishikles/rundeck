@@ -23,6 +23,7 @@ import com.dtolabs.rundeck.server.authorization.AuthConstants
 import grails.test.ControllerUnitTestCase
 import grails.test.mixin.Mock
 import grails.test.mixin.TestFor
+import org.quartz.JobExecutionContext
 import rundeck.CommandExec
 import rundeck.Execution
 import rundeck.ScheduledExecution
@@ -31,7 +32,10 @@ import rundeck.services.ApiService
 import rundeck.services.ExecutionService
 import rundeck.services.FrameworkService
 import rundeck.services.LoggingService
+import rundeck.services.ScheduledExecutionService
+import rundeck.services.WorkflowService
 import rundeck.services.logging.ExecutionLogState
+import rundeck.services.logging.WorkflowStateFileLoader
 
 @TestFor(ExecutionController)
 @Mock([Workflow,ScheduledExecution,Execution,CommandExec])
@@ -136,14 +140,18 @@ class ExecutionControllerTests  {
         Execution e1 = new Execution( project: 'test1', user: 'bob', dateStarted: new Date())
         assert e1.validate(), e1.errors.allErrors.collect { it.toString() }.join(",")
         assert e1.save()
+        def jobexec = mockWith(JobExecutionContext){}
+        controller.scheduledExecutionService = mockWith(ScheduledExecutionService){
+            findExecutingQuartzJob{id -> jobexec}
+        }
         controller.params.id=e1.id
         controller.frameworkService=mockWith(FrameworkService){
             getAuthContextForSubjectAndProject{ subj,proj-> null }
-            authorizeProjectExecutionAll{ ctx, exec, actions-> false }
+            authorizeProjectExecutionAny{ ctx, exec, actions-> false }
         }
         controller.ajaxExecState()
         assertEquals(403,response.status)
-        assertEquals("Unauthorized: Read Execution ${e1.id}",response.json.error)
+        assertEquals("Unauthorized: View Execution ${e1.id}",response.json.error)
     }
     void testDownloadOutput(){
 
@@ -595,7 +603,7 @@ class ExecutionControllerTests  {
         def fwkControl = mockFor(FrameworkService, false)
         def execControl = mockFor(ExecutionService, false)
         fwkControl.demand.getAuthContextForSubjectAndProject{ subj,proj -> return null }
-        fwkControl.demand.authorizeProjectExecutionAll { framework, e, privs -> return false }
+        fwkControl.demand.authorizeProjectExecutionAny { framework, e, privs -> return false }
 
         controller.frameworkService = fwkControl.createMock()
         controller.executionService = execControl.createMock()
@@ -613,5 +621,32 @@ class ExecutionControllerTests  {
 
         assert 403 == controller.response.status
         assert null == controller.flash.errorCode
+    }
+
+    void testAjaxExecState_ok(){
+        Execution e1 = new Execution( project: 'test1', user: 'bob', dateStarted: new Date())
+        assert e1.validate(), e1.errors.allErrors.collect { it.toString() }.join(",")
+        assert e1.save()
+        def jobexec = mockWith(JobExecutionContext){}
+        controller.scheduledExecutionService = mockWith(ScheduledExecutionService){
+            findExecutingQuartzJob{id -> jobexec}
+        }
+        controller.params.id=e1.id
+        controller.frameworkService=mockWith(FrameworkService){
+            getAuthContextForSubjectAndProject{ subj,proj-> null }
+            authorizeProjectExecutionAny{ ctx, exec, actions-> true }
+            isClusterModeEnabled{->false}
+        }
+
+        controller.executionService = mockWith(ExecutionService){
+            getExecutionState{e -> ExecutionService.EXECUTION_ABORTED}
+        }
+        def loader = new WorkflowStateFileLoader()
+        loader.state = ExecutionLogState.AVAILABLE
+        controller.workflowService = mockWith(WorkflowService){
+            requestStateSummary{e,nodes,selectedOnly, perform,steps-> loader}
+        }
+        controller.ajaxExecState()
+        assertEquals(200,response.status)
     }
 }

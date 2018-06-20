@@ -764,6 +764,7 @@ class ScheduledExecutionServiceSpec extends Specification {
         ScheduledExecutionController.ONFAILURE_TRIGGER_NAME | 'email' | 'c@example.com,d@example.com'
         ScheduledExecutionController.ONSTART_TRIGGER_NAME   | 'email' | 'c@example.com,d@example.com'
         ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'email' | 'c@example.com,d@example.com'
+        ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'email' | 'c@example.com,d@example.com'
     }
     def "validate notifications email data any domain"() {
         given:
@@ -795,7 +796,7 @@ class ScheduledExecutionServiceSpec extends Specification {
         ScheduledExecutionController.ONFAILURE_TRIGGER_NAME | 'email' | '${job.user.email}'
         ScheduledExecutionController.ONSTART_TRIGGER_NAME   | 'email' | 'monkey@internal'
         ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'email' | 'user@test'
-
+        ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'email' | 'example@any.domain'
     }
     def "invalid notifications data"() {
         given:
@@ -836,6 +837,10 @@ class ScheduledExecutionServiceSpec extends Specification {
         ScheduledExecutionController.NOTIFY_OVERAVGDURATION_RECIPIENTS|ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'email' | 'c@example.com d@example.com'
         ScheduledExecutionController.NOTIFY_OVERAVGDURATION_URL|ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'url' | ''
         ScheduledExecutionController.NOTIFY_OVERAVGDURATION_URL|ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'url' | 'c@example.com d@example.com'
+        ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS|ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'email' | ''
+        ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS|ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'email' | 'monkey@ example.com'
+        ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_URL|ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'url' | ''
+        ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_URL|ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'url' | 'monkey@ example.com'
     }
     def "do update job invalid notifications"() {
         given:
@@ -870,6 +875,8 @@ class ScheduledExecutionServiceSpec extends Specification {
         ScheduledExecutionController.NOTIFY_START_URL|ScheduledExecutionController.ONSTART_TRIGGER_NAME   | 'url' | 'c@example.com d@example.com'
         ScheduledExecutionController.NOTIFY_OVERAVGDURATION_RECIPIENTS|ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'email' | 'c@example.com d@example.com'
         ScheduledExecutionController.NOTIFY_OVERAVGDURATION_URL|ScheduledExecutionController.OVERAVGDURATION_TRIGGER_NAME   | 'url' | 'c@example.com d@example.com'
+        ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS|ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'email' | 'monkey@ example.com'
+        ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_URL|ScheduledExecutionController.ONRETRYABLEFAILURE_TRIGGER_NAME | 'url' | 'monkey@ example.com'
     }
     def "validate notifications email form fields"() {
         given:
@@ -893,6 +900,7 @@ class ScheduledExecutionServiceSpec extends Specification {
         'onfailure'|ScheduledExecutionController.NOTIFY_ONFAILURE_EMAIL | ScheduledExecutionController.NOTIFY_FAILURE_RECIPIENTS | 'c@example.com,d@example.com'
         'onstart'|ScheduledExecutionController.NOTIFY_ONSTART_EMAIL | ScheduledExecutionController.NOTIFY_START_RECIPIENTS | 'c@example.com,d@example.com'
         'onavgduration'|ScheduledExecutionController.NOTIFY_OVERAVGDURATION_EMAIL | ScheduledExecutionController.NOTIFY_OVERAVGDURATION_RECIPIENTS | 'c@example.com,d@example.com'
+        'onretryablefailure'|ScheduledExecutionController.NOTIFY_ONRETRYABLEFAILURE_EMAIL | ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS | 'c@example.com,d@example.com'
     }
     def "invalid notifications email form fields"() {
         given:
@@ -915,6 +923,7 @@ class ScheduledExecutionServiceSpec extends Specification {
         'onfailure'|ScheduledExecutionController.NOTIFY_ONFAILURE_EMAIL | ScheduledExecutionController.NOTIFY_FAILURE_RECIPIENTS | '@example.com'
         'onstart'|ScheduledExecutionController.NOTIFY_ONSTART_EMAIL | ScheduledExecutionController.NOTIFY_START_RECIPIENTS | 'c@example.'
         'onavgduration'|ScheduledExecutionController.NOTIFY_OVERAVGDURATION_EMAIL | ScheduledExecutionController.NOTIFY_OVERAVGDURATION_RECIPIENTS | 'c@example.'
+        'onretryablefailure'|ScheduledExecutionController.NOTIFY_ONRETRYABLEFAILURE_EMAIL | ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS | '@example.com'
     }
 
 
@@ -1112,8 +1121,8 @@ class ScheduledExecutionServiceSpec extends Specification {
         [defaultValue: 'val1,val2,val4'] | 'defaultValue'
         [secureInput: true]              | 'multivalued'
     }
-    def setupDoUpdate(enabled=false){
-        def uuid=UUID.randomUUID().toString()
+    def setupDoUpdate(enabled=false, serverUUID = null){
+        def uuid=serverUUID?:UUID.randomUUID().toString()
         def projectMock = Mock(IRundeckProject) {
             getProjectProperties() >> [:]
         }
@@ -1526,6 +1535,7 @@ class ScheduledExecutionServiceSpec extends Specification {
         'onfailure'|ScheduledExecutionController.NOTIFY_ONFAILURE_EMAIL | ScheduledExecutionController.NOTIFY_FAILURE_RECIPIENTS | 'c@example.com,d@example.com'
         'onstart'|ScheduledExecutionController.NOTIFY_ONSTART_EMAIL | ScheduledExecutionController.NOTIFY_START_RECIPIENTS | 'c@example.com,d@example.com'
         'onavgduration'|ScheduledExecutionController.NOTIFY_OVERAVGDURATION_EMAIL | ScheduledExecutionController.NOTIFY_OVERAVGDURATION_RECIPIENTS | 'c@example.com,d@example.com'
+        'onretryablefailure'|ScheduledExecutionController.NOTIFY_ONRETRYABLEFAILURE_EMAIL | ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS | 'c@example.com,d@example.com'
     }
     @Unroll
     def "do update options modify"(){
@@ -2611,6 +2621,25 @@ class ScheduledExecutionServiceSpec extends Specification {
         'true'     | false
         'false'    | true
     }
+    def "isRundeckProjectExecutionEnabled"() {
+        given:
+        def projectMock = Mock(IRundeckProject) {
+            getProjectProperties() >> ['project.disable.executions':property]
+        }
+        when:
+        def result = service.isRundeckProjectExecutionEnabled(projectMock)
+
+        then:
+        null != result
+        result == expect
+
+        where:
+        property   | expect
+        null       | true
+        ''         | true
+        'true'     | false
+        'false'    | true
+    }
 
     def "project passive mode schedule"() {
         given:
@@ -2622,6 +2651,26 @@ class ScheduledExecutionServiceSpec extends Specification {
         }
         when:
         def result = service.isProjectScheduledEnabled(null)
+
+        then:
+        null != result
+        result == expect
+
+        where:
+        property   | expect
+        null       | true
+        ''         | true
+        'true'     | false
+        'false'    | true
+    }
+
+    def "isRundeckProjectScheduleEnabled"() {
+        given:
+        def projectMock = Mock(IRundeckProject) {
+            getProjectProperties() >> ['project.disable.schedule':property]
+        }
+        when:
+        def result = service.isRundeckProjectScheduleEnabled(projectMock)
 
         then:
         null != result
@@ -2698,6 +2747,162 @@ class ScheduledExecutionServiceSpec extends Specification {
         false           | true             | true        | false
         true            | false            | true        | false
         false           | false            | true        | false
+    }
+
+    @Unroll
+    def "do save job with dynamic threadcount"(){
+        given:
+        setupDoUpdate()
+
+        def job = new ScheduledExecution(createJobParams(doNodedispatch: true,
+                nodeInclude: "hostname",
+                nodeThreadcountDynamic: "\${option.threadcount}",
+                retry: null,
+                timeout: null,
+                options:[new Option(name: 'threadcount', defaultValue: '30', enforced: true)]
+                ))
+
+        when:
+        job.save()
+        then:
+        job.nodeThreadcount == 30
+    }
+
+    @Unroll
+    def "do update job dynamic nodethreadcount"(){
+        given:
+        setupDoUpdate()
+
+        def se = new ScheduledExecution(createJobParams(doNodedispatch: true, nodeInclude: "hostname",
+                nodeThreadcountDynamic: "\${option.threadcount}",
+                options:[new Option(name: 'threadcount', defaultValue: '30', enforced: true)]
+        )).save()
+        def newJob = new ScheduledExecution(createJobParams(
+                doNodedispatch: true, nodeInclude: "hostname",
+                nodeThreadcount: null,
+                nodeThreadcountDynamic: null
+        ))
+
+
+
+        when:
+        def results = service._doupdateJob(se.id,newJob, mockAuth())
+
+        then:
+        results.success
+        results.scheduledExecution.nodeThreadcountDynamic=="\${option.threadcount}"
+    }
+
+    def "do update job options with label field"(){
+        given:
+        setupDoUpdate()
+
+        def se = new ScheduledExecution(createJobParams(options:[
+                new Option(name: 'test1', defaultValue: 'val1', enforced: true, values: ['a', 'b', 'c']),
+                new Option(name: 'test2', enforced: false, valuesUrl: "http://test.com/test2")
+        ])).save()
+        def newJob = new ScheduledExecution(createJobParams(
+                options: input
+        ))
+        service.fileUploadService = Mock(FileUploadService)
+
+        when:
+        def results = service._doupdateJob(se.id,newJob, mockAuth())
+
+
+        then:
+        results.success
+
+        results.scheduledExecution.options?.size() == input?.size()
+
+        for(def i=0;i<input?.size();i++){
+            for(def prop:['name','label']){
+                results.scheduledExecution.options[0]."$prop"==input[i]."$prop"
+            }
+        }
+
+        where:
+        input|_
+        [new Option(name: 'test1', label: 'label1', defaultValue: 'val3', enforced: false, valuesUrl: "http://test.com/test3"),
+         new Option(name: 'test3', label: 'label2', defaultValue: 'd', enforced: true, values: ['a', 'b', 'c', 'd']),
+        ] |  _
+        null |  _
+
+    }
+      
+              
+      
+    @Unroll
+    def "do update job on cluster"(){
+        given:
+        def serverUuid = '8527d81a-49cd-42e3-a853-43b956b77600'
+        def jobOwnerUuid = '5e0e96a0-042a-426a-80a4-488f7f6a4f13'
+        def uuid=setupDoUpdate(true, serverUuid)
+        def se = new ScheduledExecution(createJobParams([serverNodeUUID:jobOwnerUuid])).save()
+        service.jobSchedulerService = Mock(JobSchedulerService)
+
+        when:
+        def results = service._doupdate([id: se.id.toString()] + inparams, mockAuth())
+
+
+        then:
+        results.success
+        results.scheduledExecution.serverNodeUUID == (shouldChange?serverUuid:jobOwnerUuid)
+        if(shouldChange) {
+            1 * service.jobSchedulerService.updateScheduleOwner(_, _, _) >> true
+        }
+
+        where:
+        inparams                                        | shouldChange
+        [jobName: 'newName']                            | false
+        [jobName: 'newName', scheduled: false]          | true
+        [jobName: 'newName', scheduled: true]           | false
+        [jobName: 'newName', timeZone: 'GMT+1']         | true
+        [jobName: 'newName', dayOfMonth: '10']          | true
+        [jobName: 'newName', scheduleEnabled: true]     | false
+        [jobName: 'newName', scheduleEnabled: false]    | true
+        [jobName: 'newName', executionEnabled: true]     | false
+        [jobName: 'newName', executionEnabled: false]    | true
+
+    }
+
+
+    @Unroll
+    def "do update list of jobs on cluster"(){
+        given:
+        def serverUUID = '802d38a5-0cd1-44b3-91ff-824d495f8105'
+        def currentOwner = '05b604ed-9a1e-4cb4-8def-b17a071afec9'
+        def uuid = setupDoUpdate(true,serverUUID)
+        service.jobSchedulerService = Mock(JobSchedulerService)
+
+        def orig = [serverNodeUUID: currentOwner]
+
+        def se = new ScheduledExecution(createJobParams(orig)).save()
+        def newJob = new ScheduledExecution(createJobParams(inparams)).save()
+        service.frameworkService.getNodeStepPluginDescription('asdf') >> Mock(Description)
+        service.frameworkService.validateDescription(_, '', _, _, _, _) >> [valid: true]
+
+        when:
+        def results = service._doupdateJob(se.id,newJob, mockAuth())
+
+        then:
+        results.success
+        results.scheduledExecution.serverNodeUUID == (shouldChange?serverUUID:currentOwner)
+        if(shouldChange) {
+            1 * service.jobSchedulerService.updateScheduleOwner(_, _, _) >> true
+        }
+
+        where:
+        inparams                                        | shouldChange
+        [jobName: 'newName']                            | false
+        [jobName: 'newName', scheduled: false]          | true
+        [jobName: 'newName', scheduled: true]           | false
+        [jobName: 'newName', timeZone: 'GMT+1']         | true
+        [jobName: 'newName', dayOfMonth: '10']          | true
+        [jobName: 'newName', scheduleEnabled: true]     | false
+        [jobName: 'newName', scheduleEnabled: false]    | true
+        [jobName: 'newName', executionEnabled: true]     | false
+        [jobName: 'newName', executionEnabled: false]    | true
     }
 
 }

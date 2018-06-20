@@ -25,7 +25,7 @@ import com.dtolabs.rundeck.core.authorization.AuthContext
 import com.dtolabs.rundeck.core.authorization.UserAndRolesAuthContext
 import com.dtolabs.rundeck.core.common.FrameworkProject
 import com.dtolabs.rundeck.server.authorization.AuthConstants
-
+import grails.test.mixin.Mock
 import grails.test.mixin.TestFor
 
 import org.codehaus.groovy.grails.plugins.codecs.JSONCodec;
@@ -33,7 +33,7 @@ import org.codehaus.groovy.grails.plugins.testing.GrailsMockHttpServletResponse
 import org.junit.Before
 import org.junit.Test
 import org.springframework.context.MessageSource
-
+import rundeck.Project
 import rundeck.filters.ApiRequestFilters
 import rundeck.services.ApiService
 import rundeck.services.FrameworkService
@@ -48,6 +48,7 @@ import javax.servlet.http.HttpServletResponse
  * @since 2014-03-04
  */
 @TestFor(ProjectController)
+@Mock([Project])
 class ProjectControllerTest {
 
     @Before
@@ -454,7 +455,7 @@ class ProjectControllerTest {
             apiService(ApiService)
         }
         controller.apiService.messageSource= mockWith(MessageSource) {
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -481,7 +482,7 @@ class ProjectControllerTest {
         }
         mockCodec(JSONCodec)
         controller.apiService.messageSource= mockWith(MessageSource) {
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -510,7 +511,7 @@ class ProjectControllerTest {
             apiService(ApiService)
         }
         controller.apiService.messageSource= mockWith(MessageSource) {
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -538,7 +539,7 @@ class ProjectControllerTest {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
         controller.apiService.messageSource= mockWith(MessageSource) {
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -566,7 +567,7 @@ class ProjectControllerTest {
     void apiProjectCreate_xml_projectExists() {
         controller.apiService = new ApiService()
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -596,7 +597,7 @@ class ProjectControllerTest {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -624,7 +625,7 @@ class ProjectControllerTest {
     void apiProjectCreate_xml_withErrors() {
         controller.apiService = new ApiService()
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -653,7 +654,7 @@ class ProjectControllerTest {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -680,7 +681,7 @@ class ProjectControllerTest {
     void apiProjectCreate_xml_success() {
         controller.apiService = new ApiService()
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -715,7 +716,7 @@ class ProjectControllerTest {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -746,7 +747,7 @@ class ProjectControllerTest {
     void apiProjectCreate_xml_withconfig() {
         controller.apiService = new ApiService()
         controller.apiService.messageSource= mockWith(MessageSource){
-            getMessage{code,args,locale->
+            getMessage{code,args,defval,locale->
                 code
             }
         }
@@ -841,7 +842,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_apiversion(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         request.method = 'DELETE'
         request.setAttribute('api_version', 10) // require version 11
         controller.apiProjectDelete()
@@ -852,7 +853,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_xml_missingparam(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         request.method = 'DELETE'
         request.setAttribute('api_version', 11) // require version 11
         controller.apiProjectDelete()
@@ -863,7 +864,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_json_missingparam(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         request.method = 'DELETE'
         response.format='json'
@@ -876,7 +877,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_xml_notfound(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(false, false)
         request.method = 'DELETE'
@@ -891,7 +892,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_json_notfound(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(false, false)
         request.method = 'DELETE'
@@ -906,7 +907,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_xml_unauthorized(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(true, false)
         request.method = 'DELETE'
@@ -921,7 +922,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_json_unauthorized(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(true, false)
         request.method = 'DELETE'
@@ -936,7 +937,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_xml_haserrors(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(true, true)
         controller.projectService=mockProjectServiceForProjectDelete(false, 'deleteProjectFailed')
@@ -954,7 +955,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_json_haserrors(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(true, true)
         controller.projectService = mockProjectServiceForProjectDelete(false, 'deleteProjectFailed')
@@ -970,7 +971,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_xml_success(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(true, true)
         controller.projectService=mockProjectServiceForProjectDelete(true, null)
@@ -986,7 +987,7 @@ class ProjectControllerTest {
     @Test
     void deleteProject_json_success(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         mockCodec(JSONCodec)
         controller.frameworkService=mockFrameworkServiceForProjectDelete(true, true)
         controller.projectService = mockProjectServiceForProjectDelete(true, null)
@@ -1095,7 +1096,7 @@ class ProjectControllerTest {
             }
             getFrameworkProject{name->
                 assertEquals('test1',name)
-                [name:name,propertyFile: [text: propFileText]]
+                [name:name]
             }
             setFrameworkProjectConfig{proj,configProps->
                 assertEquals props,configProps
@@ -1296,7 +1297,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigGet_apiversion(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(false, false, 'read', [:])
         request.api_version=10
         controller.apiProjectConfigGet()
@@ -1307,7 +1308,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigGet_xml_missingparam(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(false, false, 'read', [:])
         request.api_version = 11
         controller.apiProjectConfigGet()
@@ -1324,7 +1325,7 @@ class ProjectControllerTest {
     void apiProjectConfigGet_json_missingparam(){
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(false, false, 'read', [:])
         request.api_version = 11
         response.format='json'
@@ -1336,7 +1337,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigGet_xml_notfound(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(false, false, 'read', [:])
         request.api_version = 11
         params.project='test1'
@@ -1349,7 +1350,7 @@ class ProjectControllerTest {
     void apiProjectConfigGet_json_notfound(){
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(false, false, 'read', [:])
         request.api_version = 11
         params.project = 'test1'
@@ -1362,7 +1363,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigGet_xml_unauthorized(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(true, false, 'configure', [:])
         request.api_version = 11
         params.project='test1'
@@ -1375,7 +1376,7 @@ class ProjectControllerTest {
     void apiProjectConfigGet_json_unauthorized(){
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(true, false, 'configure', [:])
         request.api_version = 11
         params.project = 'test1'
@@ -1388,7 +1389,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigGet_xml_success(){
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(true, true, 'configure', ["prop1": "value1", "prop2": "value2"])
         request.api_version = 11
         params.project='test1'
@@ -1405,7 +1406,7 @@ class ProjectControllerTest {
     void apiProjectConfigGet_json_success(){
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(true, true, 'configure', ["prop1": "value1", "prop2": "value2"])
         request.api_version = 11
         params.project = 'test1'
@@ -1419,7 +1420,7 @@ class ProjectControllerTest {
     void apiProjectConfigGet_text_success(){
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigGet(true, true, 'configure', [:],
                 "text format for properties")
         request.api_version = 11
@@ -1432,7 +1433,7 @@ class ProjectControllerTest {
 
     @Test
     void apiProjectConfigPut_xml_success(){
-        //controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        //controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.apiService = new ApiService()
         controller.frameworkService= mockFrameworkServiceForProjectConfigPut(true, true, 'configure', ['prop1': 'value1',
                 prop2: 'value2'], true, null, 'text')
@@ -1453,7 +1454,7 @@ class ProjectControllerTest {
     void apiProjectConfigPut_json_success(){
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService= mockFrameworkServiceForProjectConfigPut(true, true, 'configure', ['prop1': 'value1',
                 prop2: 'value2'], true, null, 'text')
         request.api_version = 11
@@ -1465,29 +1466,12 @@ class ProjectControllerTest {
         assertEquals 'value1', response.json['prop1']
         assertEquals 'value2', response.json['prop2']
     }
-    @Test
-    void apiProjectConfigPut_text_success(){
-        controller.apiService = new ApiService()
-        mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
-        controller.frameworkService= mockFrameworkServiceForProjectConfigPut(true, true, 'configure', ['prop1': 'value1',
-                prop2: 'value2'], true, null, 'prop1=value1\nprop2=value2')
-        request.api_version = 11
-        params.project = 'test1'
-        request.content='prop1=value1\nprop2=value2'.bytes
-        request.contentType='text/plain'
-        request.method='PUT'
-        controller.apiProjectConfigPut()
-        assertEquals HttpServletResponse.SC_OK, response.status
-        assertTrue response.contentType.contains('text/plain')
-        assertEquals 'prop1=value1\nprop2=value2', response.text
-    }
 
 
     @Test
     void apiProjectConfigKeyGet_xml_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigGet(true, true, 'configure', ["prop1": "value1", "prop2": "value2"])
         request.api_version = 11
         params.project = 'test1'
@@ -1504,7 +1488,7 @@ class ProjectControllerTest {
     void apiProjectConfigKeyGet_json_success() {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigGet(true, true, 'configure', ["prop1": "value1", "prop2": "value2"])
         request.api_version = 11
         params.project = 'test1'
@@ -1518,7 +1502,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigKeyGet_text_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigGet(true, true, 'configure', ["prop1": "value1", "prop2": "value2"])
         request.api_version = 11
         params.project = 'test1'
@@ -1533,7 +1517,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigKeyPut_xml_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigKeyPut(true, true, 'configure',
                 ["prop1": "value1"],true,null,null)
         request.api_version = 11
@@ -1552,7 +1536,7 @@ class ProjectControllerTest {
     void apiProjectConfigKeyPut_json_success() {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigKeyPut(true, true, 'configure',
                 ["prop1": "value1"],true,null,null)
         request.api_version = 11
@@ -1569,7 +1553,7 @@ class ProjectControllerTest {
     void apiProjectConfigKeyPut_text_success() {
         controller.apiService = new ApiService()
         mockCodec(JSONCodec)
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigKeyPut(true, true, 'configure',
                 ["prop1": "value1"],true,null,null)
         request.api_version = 11
@@ -1586,7 +1570,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectConfigKeyDelete_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectConfigKeyDelete(true, true, 'configure',
                 'prop1', true, null, null)
         request.api_version = 11
@@ -1599,7 +1583,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectExport_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectExport(true, true, 'export',true,true)
         controller.projectService=mockWith(ProjectService){
             exportProjectToOutputStream{project,fwk,stream,l,aclperms,opts->
@@ -1619,7 +1603,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectExport_success_aclpermsfalse() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectExport(true, true, 'export',true,false)
         controller.projectService=mockWith(ProjectService){
             exportProjectToOutputStream{project,fwk,stream,l,aclperms,opts->
@@ -1639,7 +1623,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectExport_apiversion() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectExport(true, true, 'export',true,true)
         controller.projectService=mockWith(ProjectService){
             exportProjectToOutputStream{project,fwk,stream->
@@ -1655,7 +1639,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectExport_notfound() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectExport(false, true, 'export',true,true)
         controller.projectService=mockWith(ProjectService){
             exportProjectToOutputStream{project,fwk,stream->
@@ -1671,7 +1655,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectExport_unauthorized() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectExport(true, false, 'export',true,true)
         controller.projectService=mockWith(ProjectService){
             exportProjectToOutputStream{project,fwk,stream->
@@ -1687,7 +1671,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_notfound() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(false, true, 'import')
         request.api_version = 11
         params.project = 'test1'
@@ -1699,7 +1683,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_unauthorized() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, false, 'import')
         request.api_version = 11
         params.project = 'test1'
@@ -1711,7 +1695,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_invalidFormat() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         request.api_version = 11
         params.project = 'test1'
@@ -1723,7 +1707,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_xml_failure() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1752,7 +1736,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_json_failure() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1780,7 +1764,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_xml_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1810,7 +1794,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_importExecutionsFalse() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1838,7 +1822,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_importExecutionsTrue() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project, framework,
@@ -1866,7 +1850,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_jobUuidOptionPreserve() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1894,7 +1878,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_jobUuidOptionRemove() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1922,7 +1906,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_jobUuidOption_invalidValue() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code+';'+args.join(';') } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, defval, locale -> code+';'+args.join(';') } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1955,7 +1939,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_json_success() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args,defval, locale -> code } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import')
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -1983,7 +1967,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_importAcl_unauthorized() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code+';'+args } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, defval, locale -> code+';'+args } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import',true,false)
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,
@@ -2018,7 +2002,7 @@ class ProjectControllerTest {
     @Test
     void apiProjectImport_importAcl_authorized() {
         controller.apiService = new ApiService()
-        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, locale -> code+';'+args } }
+        controller.apiService.messageSource = mockWith(MessageSource) { getMessage { code, args, defval, locale -> code+';'+args } }
         controller.frameworkService = mockFrameworkServiceForProjectImport(true, true, 'import',true,true)
         controller.projectService=mockWith(ProjectService){
             importToProject{  project,  framework,

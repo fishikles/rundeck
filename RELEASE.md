@@ -1,9 +1,9 @@
-Release 2.10.6
+Release 2.11.4
 ===========
 
-Date: 2018-02-02
+Date: 2018-06-07
 
-Name: <span style="color: CornflowerBlue"><span class="glyphicon glyphicon-grain"></span> "cafe mocha cornflowerblue grain"</span>
+Name: <span style="color: SaddleBrown"><span class="glyphicon glyphicon-pushpin"></span> "cappuccino saddlebrown pushpin"</span>
 
 ## Upgrading from Earlier versions
 
@@ -11,21 +11,29 @@ Name: <span style="color: CornflowerBlue"><span class="glyphicon glyphicon-grain
 
 ## Notes
 
-Bugfix release with one enhancement.
+Bug and security fixes.
+
+This release addresses a potential security issue in processing of zip files,
+please see the this issue: [Security Advisory: Zip Slip directory traversal vulnerability #3471](https://github.com/rundeck/rundeck/issues/3471).
 
 ## Contributors
 
 * Greg Schueler (gschueler)
+* Jaime Tobar (jtobard)
+* Stephen Joyner (sjrd218)
 
 ## Bug Reporters
 
 * gschueler
-* jplassnibatt
+* jtobard
+* kino71
 
 ## Issues
 
-[Milestone 2.10.6](https://github.com/rundeck/rundeck/milestone/70)
+[Milestone 2.11.4](https://github.com/rundeck/rundeck/milestone/78)
 
-* [${config.*} plugin variables not resolving after upgrade to 2.1.1](https://github.com/rundeck/rundeck/issues/3112)
-* [Fix issue: stacktrace if missing input params to acl delete](https://github.com/rundeck/rundeck/pull/3099)
-* [Select job xml/yaml format based on selected file name in upload form](https://github.com/rundeck/rundeck/pull/3093)
+* [2.11: backport bug fixes](https://github.com/rundeck/rundeck/issues/3494)
+    * [#3384 duplicate jobs page doesn't show options](https://github.com/rundeck/rundeck/issues/3384)
+    * [#3423 Create project via API with invalid project name does not return error](https://github.com/rundeck/rundeck/issues/3423)
+    * [2.11: Git plugin setup page does not preserve current values in Select fields](https://github.com/rundeck/rundeck/issues/3493)
+    * [backport: Zip Slip fix for 2.11](https://github.com/rundeck/rundeck/pull/3486)

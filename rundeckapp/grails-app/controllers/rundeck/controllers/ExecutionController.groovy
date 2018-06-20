@@ -23,6 +23,7 @@ import com.dtolabs.rundeck.app.api.jobs.upload.JobFileInfo
 import com.dtolabs.rundeck.app.support.BuilderUtil
 import com.dtolabs.rundeck.app.support.ExecutionViewParams
 import com.dtolabs.rundeck.core.authorization.AuthContext
+import com.dtolabs.rundeck.core.common.PluginDisabledException
 import com.dtolabs.rundeck.core.execution.workflow.state.StateUtils
 import com.dtolabs.rundeck.core.execution.workflow.state.StepIdentifier
 import com.dtolabs.rundeck.core.logging.LogEvent
@@ -31,12 +32,15 @@ import com.dtolabs.rundeck.core.logging.ReverseSeekingStreamingLogReader
 import com.dtolabs.rundeck.core.logging.StreamingLogReader
 import com.dtolabs.rundeck.app.support.ExecutionQuery
 import com.dtolabs.rundeck.core.utils.OptsUtil
+import com.dtolabs.rundeck.plugins.ServiceNameConstants
 import com.dtolabs.rundeck.plugins.logging.LogFilterPlugin
 import com.dtolabs.rundeck.plugins.logs.ContentConverterPlugin
 import com.dtolabs.rundeck.server.authorization.AuthConstants
 import com.dtolabs.rundeck.server.plugins.DescribedPlugin
 import grails.converters.JSON
 import org.codehaus.groovy.grails.web.mapping.LinkGenerator
+import org.quartz.JobExecutionContext
+import org.springframework.dao.DataAccessResourceFailureException
 import rundeck.CommandExec
 import rundeck.Execution
 import rundeck.ScheduledExecution
@@ -83,7 +87,8 @@ class ExecutionController extends ControllerBase{
             apiExecutionDeleteBulk: ['POST'],
             apiExecutionModePassive: ['POST'],
             apiExecutionModeActive: ['POST'],
-            cancelExecution:'POST'
+            cancelExecution:'POST',
+            incompleteExecution: 'POST'
     ]
 
     def index() {
@@ -214,12 +219,13 @@ class ExecutionController extends ControllerBase{
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
 
-        if (unauthorizedResponse(frameworkService.authorizeProjectExecutionAll(authContext, e,
-                [AuthConstants.ACTION_READ]), AuthConstants.ACTION_READ,'Execution',params.id)) {
+        if (unauthorizedResponse(frameworkService.authorizeProjectExecutionAny(authContext, e,
+                [AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW]), AuthConstants.ACTION_VIEW,'Execution',params.id)) {
             return
         }
         if(!params.project || params.project!=e.project) {
-            return redirect(controller: 'execution', action: 'show', params: [id: params.id, project: e.project])
+            return redirect(controller: 'execution', action: 'show', params: [id: params.id, project: e.project], fragment: params?.outdetails)
+
         }
         params.project=e.project
         request.project=e.project
@@ -249,8 +255,8 @@ class ExecutionController extends ControllerBase{
             order('dateStarted', 'desc')
         }
         eprev = result ? result[0] : null
-
-        def workflowTree = scheduledExecutionService.getWorkflowDescriptionTree(e.project, e.workflow, 0)
+        def readAuth=frameworkService.authorizeProjectExecutionAny(authContext, e, [AuthConstants.ACTION_READ])
+        def workflowTree = scheduledExecutionService.getWorkflowDescriptionTree(e.project, e.workflow, readAuth,0)
         def inputFiles = fileUploadService.findRecords(e, FileUploadService.RECORD_TYPE_OPTION_INPUT)
         def inputFilesMap = inputFiles.collectEntries { [it.uuid, it] }
 
@@ -349,9 +355,9 @@ class ExecutionController extends ControllerBase{
 
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
 
-        if (e && !frameworkService.authorizeProjectExecutionAll(authContext, e, [AuthConstants.ACTION_READ])) {
+        if (e && !frameworkService.authorizeProjectExecutionAny(authContext, e, [AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW])) {
             response.status=HttpServletResponse.SC_FORBIDDEN
-            return render(contentType: 'application/json',text:[error: "Unauthorized: Read Execution ${params.id}"] as JSON)
+            return render(contentType: 'application/json',text:[error: "Unauthorized: View Execution ${params.id}"] as JSON)
         }
 
         def jobcomplete = e.dateCompleted != null
@@ -448,9 +454,9 @@ class ExecutionController extends ControllerBase{
 
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
 
-        if (e && !frameworkService.authorizeProjectExecutionAll(authContext, e, [AuthConstants.ACTION_READ])) {
+        if (e && !frameworkService.authorizeProjectExecutionAny(authContext, e, [AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW])) {
             response.status=HttpServletResponse.SC_FORBIDDEN
-            return render(contentType: 'application/json',text:[error: "Unauthorized: Read Execution ${params.id}"] as JSON)
+            return render(contentType: 'application/json',text:[error: "Unauthorized: View Execution ${params.id}"] as JSON)
         }
 
 
@@ -577,36 +583,59 @@ class ExecutionController extends ControllerBase{
                 }
             }
         }
-        def Execution e = Execution.get(params.id)
-        if(!e){
-            log.error("Execution not found for id: "+params.id)
-            return withFormat {
-                json{
-                    render(contentType:"text/json"){
-                        delegate.cancelled=false
-                        delegate.error = "Execution not found for id: " + params.id
+
+        ExecutionService.AbortResult abortresult
+        try {
+
+            def Execution e = Execution.get(params.id)
+            if (!e) {
+                log.error("Execution not found for id: " + params.id)
+                return withFormat {
+                    json {
+                        render(contentType: "text/json") {
+                            delegate.cancelled = false
+                            delegate.error = "Execution not found for id: " + params.id
+                        }
+                    }
+                    xml {
+                        xmlerror()
                     }
                 }
-                xml {
-                    xmlerror()
-                }
             }
-        }
-        AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
-        def ScheduledExecution se = e.scheduledExecution
-        ExecutionService.AbortResult abortresult = executionService.abortExecution(
+            AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject, e.project)
+            def ScheduledExecution se = e.scheduledExecution
+            abortresult = executionService.abortExecution(
                 se,
                 e,
                 session.user,
                 authContext,
                 null,
                 params.forceIncomplete == 'true'
-        )
+            )
+        }catch (DataAccessResourceFailureException ex){
+            log.error("Database acces failure, forced job interruption",ex)
+            //force interrupt on database problem
+            JobExecutionContext jexec = scheduledExecutionService.findExecutingQuartzJob(Long.valueOf(params.id))
+            abortresult = new ExecutionService.AbortResult()
+            def didCancel = false
+            if(jexec){
+                didCancel = scheduledExecutionService.interruptJob(
+                    jexec.fireInstanceId,
+                    jexec.getJobDetail().key.getName(),
+                    jexec.getJobDetail().key.getGroup(),
+                    true
+                )
+            }
+
+            abortresult.abortstate = ExecutionService.ABORT_ABORTED
+            abortresult.status = "db-error"
+        }
 
 
         def didcancel=abortresult.abortstate in [ExecutionService.ABORT_ABORTED, ExecutionService.ABORT_PENDING]
-
         def reasonstr=abortresult.reason
+
+
         withFormat{
             json{
                 render(contentType:"text/json"){
@@ -633,6 +662,68 @@ class ExecutionController extends ControllerBase{
         }
     }
 
+    def incompleteExecution (){
+        boolean valid=false
+        withForm{
+            valid=true
+            g.refreshFormTokensHeader()
+        }.invalidToken{
+
+        }
+        if(!valid){
+            response.status=HttpServletResponse.SC_BAD_REQUEST
+            request.error = g.message(code: 'request.error.invalidtoken.message')
+            return withFormat {
+                json {
+                    render(contentType: "text/json") {
+                        delegate.cancelled = false
+                        delegate.error= request.error
+                    }
+                }
+                xml {
+                    xmlerror()
+                }
+            }
+        }
+
+        ExecutionService.AbortResult abortresult
+        def Execution e = Execution.get(params.id)
+        if (!e) {
+            log.error("Execution not found for id: " + params.id)
+            return withFormat {
+                json {
+                    render(contentType: "text/json") {
+                        delegate.cancelled = false
+                        delegate.error = "Execution not found for id: " + params.id
+                    }
+                }
+                xml {
+                    xmlerror()
+                }
+            }
+        }
+        AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject, e.project)
+        def ScheduledExecution se = e.scheduledExecution
+        abortresult = executionService.abortExecution(
+            se,
+            e,
+            session.user,
+            authContext,
+            null,
+            true
+        )
+        def didcancel=abortresult.abortstate in [ExecutionService.ABORT_ABORTED, ExecutionService.ABORT_PENDING]
+        withFormat{
+            json{
+                render(contentType:"text/json"){
+                    delegate.cancelled=didcancel
+                    delegate.status=(abortresult.status?:(didcancel?'killed':'failed'))
+                    delegate.abortstate = abortresult.abortstate
+                }
+            }
+        }
+
+    }
     def downloadOutput() {
         Execution e = Execution.get(Long.parseLong(params.id))
         if(!e){
@@ -755,7 +846,7 @@ class ExecutionController extends ControllerBase{
                 msgbuf.metadata.keySet().findAll { it.startsWith('content-meta:') }.each {
                     meta[it.substring('content-meta:'.length())] = msgbuf.metadata[it]
                 }
-                String result = convertContentDataType(message, msgbuf.metadata['content-data-type'], meta, 'text/html')
+                String result = convertContentDataType(message, msgbuf.metadata['content-data-type'], meta, 'text/html', e.project)
                 if (result != null) {
                     msghtml = result.encodeAsSanitizedHTML()
                     converted = true
@@ -979,8 +1070,8 @@ class ExecutionController extends ControllerBase{
         if(!e){
             return apiError('api.error.item.doesnotexist', ['execution', params.id], HttpServletResponse.SC_NOT_FOUND);
         }
-        if(e && !frameworkService.authorizeProjectExecutionAll(authContext,e,[AuthConstants.ACTION_READ])){
-            return apiError('api.error.item.unauthorized', [AuthConstants.ACTION_READ, "Execution", params.id], HttpServletResponse.SC_FORBIDDEN);
+        if(e && !frameworkService.authorizeProjectExecutionAny(authContext,e,[AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW])){
+            return apiError('api.error.item.unauthorized', [AuthConstants.ACTION_VIEW, "Execution", params.id], HttpServletResponse.SC_FORBIDDEN);
         }
         if (params.stepctx && !(params.stepctx ==~ /^(\d+e?(@.+?)?\/?)+$/)) {
             return apiError("api.error.parameter.invalid",[params.stepctx,'stepctx',"Invalid stepctx filter"],HttpServletResponse.SC_BAD_REQUEST)
@@ -1295,7 +1386,8 @@ class ExecutionController extends ControllerBase{
                             logentry.mesg,
                             logentry['content-data-type'],
                             meta,
-                            'text/html'
+                            'text/html',
+                            e.project
                     )
                     if (result != null) {
                         logentry.loghtml = result.encodeAsSanitizedHTML()
@@ -1391,13 +1483,20 @@ class ExecutionController extends ControllerBase{
     }
 
     //TODO: move to a service
-    private String convertContentDataType(final Object input, final String inputDataType, Map<String,String> meta, final String outputType) {
+    private String convertContentDataType(final Object input, final String inputDataType, Map<String,String> meta, final String outputType, String projectName) {
 //        log.error("find converter : ${input.class}(${inputDataType}) => ?($outputType)")
         def plugins = listViewPlugins()
+
+        def isPluginEnabled = executionService.getFrameworkService().
+            getPluginControlService(projectName).
+            enabledPredicateForService(ServiceNameConstants.ContentConverter)
+
+        plugins = plugins.findAll { isPluginEnabled.test(it.key) }
+
         List<DescribedPlugin<ContentConverterPlugin>> foundPlugins = findOutputViewPlugins(
-                plugins,
-                inputDataType,
-                input.class
+            plugins,
+            inputDataType,
+            input.class
         )
         def chain = []
 
@@ -1443,8 +1542,13 @@ class ExecutionController extends ControllerBase{
                     ovalue = plugin.instance.convert(ovalue, otype, meta)
                     otype = nexttype
                 }
+            } catch (PluginDisabledException disabledException){
+                log.error(
+                        "Failed converting data type ${input.getClass()}($inputDataType)  with plugins: ${chain*.name}",
+                        disabledException
+                )
             } catch (Throwable t) {
-                log.warn(
+                log.error(
                         "Failed converting data type ${input.getClass()}($inputDataType)  with plugins: ${chain*.name}",
                         t
                 )
@@ -1531,9 +1635,9 @@ class ExecutionController extends ControllerBase{
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
         if(!apiService.requireAuthorized(
-                frameworkService.authorizeProjectExecutionAll(authContext,e,[AuthConstants.ACTION_READ]),
+                frameworkService.authorizeProjectExecutionAny(authContext,e,[AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW]),
                 response,
-                [AuthConstants.ACTION_READ, "Execution", params.id] as Object[])){
+                [AuthConstants.ACTION_VIEW, "Execution", params.id] as Object[])){
             return
         }
 
@@ -1567,9 +1671,9 @@ class ExecutionController extends ControllerBase{
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
         if(!apiService.requireAuthorized(
-                frameworkService.authorizeProjectExecutionAll(authContext,e,[AuthConstants.ACTION_READ]),
+                frameworkService.authorizeProjectExecutionAny(authContext,e,[AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW]),
                 response,
-                [AuthConstants.ACTION_READ, "Execution", params.id] as Object[])){
+                [AuthConstants.ACTION_VIEW, "Execution", params.id] as Object[])){
             return
         }
 
@@ -1678,33 +1782,55 @@ class ExecutionController extends ControllerBase{
         if (!apiService.requireApi(request, response)) {
             return
         }
-        def Execution e = Execution.get(params.id)
-        if(!apiService.requireExists(response,e,['Execution ID',params.id])){
-            return
-        }
-        AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject,e.project)
-        if(!apiService.requireAuthorized(
-                frameworkService.authorizeProjectExecutionAll(authContext,e,[AuthConstants.ACTION_KILL]),
+        ExecutionService.AbortResult abortresult
+        def Execution e
+        try {
+            e = Execution.get(params.id)
+            if (!apiService.requireExists(response, e, ['Execution ID', params.id])) {
+                return
+            }
+            AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject, e.project)
+            if (!apiService.requireAuthorized(
+                frameworkService.authorizeProjectExecutionAll(authContext, e, [AuthConstants.ACTION_KILL]),
                 response,
-                [AuthConstants.ACTION_KILL, "Execution", params.id] as Object[])){
-            return
-        }
+                [AuthConstants.ACTION_KILL, "Execution", params.id] as Object[]
+            )) {
+                return
+            }
 
-        def ScheduledExecution se = e.scheduledExecution
-        def user=session.user
-        def killas=null
-        if (params.asUser && apiService.requireVersion(request,response,ApiRequestFilters.V5)) {
-            //authorized within service call
-            killas= params.asUser
-        }
-        ExecutionService.AbortResult abortresult = executionService.abortExecution(
+            def ScheduledExecution se = e.scheduledExecution
+            def user = session.user
+            def killas = null
+            if (params.asUser && apiService.requireVersion(request, response, ApiRequestFilters.V5)) {
+                //authorized within service call
+                killas = params.asUser
+            }
+            abortresult = executionService.abortExecution(
                 se,
                 e,
                 user,
                 authContext,
                 killas,
                 params.forceIncomplete == 'true'
-        )
+            )
+        }catch (DataAccessResourceFailureException ex){
+            log.error("Database acces failure, forced job interruption",ex)
+            //force interrupt on database problem
+            JobExecutionContext jexec = scheduledExecutionService.findExecutingQuartzJob(Long.valueOf(params.id))
+            abortresult = new ExecutionService.AbortResult()
+            def didCancel = false
+            if(jexec){
+                didCancel = scheduledExecutionService.interruptJob(
+                    jexec.fireInstanceId,
+                    jexec.getJobDetail().key.getName(),
+                    jexec.getJobDetail().key.getGroup(),
+                    true
+                )
+            }
+
+            abortresult.abortstate = didCancel?ExecutionService.ABORT_ABORTED:ExecutionService.ABORT_PENDING
+            throw ex
+        }
 
         def reportstate=[status: abortresult.abortstate]
         if(abortresult.reason){
@@ -2043,9 +2169,9 @@ class ExecutionController extends ControllerBase{
         }
         AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(session.subject, e.project)
         if (!apiService.requireAuthorized(
-                frameworkService.authorizeProjectExecutionAll(authContext, e, [AuthConstants.ACTION_READ]),
+                frameworkService.authorizeProjectExecutionAny(authContext, e, [AuthConstants.ACTION_READ,AuthConstants.ACTION_VIEW]),
                 response,
-                [AuthConstants.ACTION_READ, "Execution", params.id] as Object[]
+                [AuthConstants.ACTION_VIEW, "Execution", params.id] as Object[]
         )) {
             return
         }

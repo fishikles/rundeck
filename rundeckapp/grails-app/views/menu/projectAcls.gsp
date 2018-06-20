@@ -1,5 +1,5 @@
 %{--
-  - Copyright 2017 Rundeck, Inc. (http://rundeck.com)
+  - Copyright 2018 Rundeck, Inc. (http://rundeck.com)
   -
   - Licensed under the Apache License, Version 2.0 (the "License");
   - you may not use this file except in compliance with the License.
@@ -62,7 +62,8 @@
     <meta name="layout" content="base"/>
     <meta name="tabpage" content="projectconfigure"/>
     <meta name="projtabtitle" content="${message(code: 'gui.menu.AccessControl')}"/>
-    <title><g:message code="page.title.project.access.control.0" args="${[params.project]}"/></title>
+    <g:set var="projectLabel" value="${session.frameworkLabels?session.frameworkLabels[params.project]:params.project}"/>
+    <title><g:message code="page.title.project.access.control.0" args="${[projectLabel]}"/></title>
 
     <asset:javascript src="menu/aclListing.js"/>
     <script type="application/javascript">

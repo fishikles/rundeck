@@ -1092,6 +1092,8 @@ Option model providers are configured on a per-Option basis (where a Job may hav
 3. It must be in one of two JSON structures, *either*:
     * An array of string values
     * OR, an array of Maps, each with two entries, `name` and `value`.
+4. By default, the HTTP(S) response must include the `application/json` content type in the header. 
+   In case this cannot be controlled, the attribute `project.jobs.disableRemoteOptionJsonCheck` can be set to `true` in the project settings.
 
 ### Configuration ###
 
@@ -1647,6 +1649,7 @@ Job context variables:
 * `job.group`: Group of the Job
 * `job.id`: ID of the Job
 * `job.execid`: ID of the current Execution
+* `job.executionType` : Execution type, can be `user`, `scheduled` or `user-scheduled` for `Run Job Later` executions
 * `job.username`: Username of the user executing the Job
 * `job.project`: Project name
 * `job.loglevel`: Logging level, one of: 'ERROR','WARN','INFO','VERBOSE','DEBUG'

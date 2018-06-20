@@ -55,6 +55,28 @@ View the [Index](#index) listing API paths.
 
 Changes introduced by API Version number:
 
+**Version 24**:
+
+* New Endpoints.
+    - [`POST /api/V/job/[ID]/retry/[EXECID]`][POST /api/V/job/[ID]/retry/[EXECID]] - Retry a Job based on execution
+
+**Version 23**:
+
+* New Endpoints. (replacing removed `POST /api/2/project/[PROJECT]/resources` endpoint)
+    - [`GET /api/V/project/[PROJECT]/sources`][/api/V/project/[PROJECT]/sources] - List project resource model sources
+    - [`GET /api/V/project/[PROJECT]/source/[INDEX]`][/api/V/project/[PROJECT]/source/[INDEX]] - Get a specific project resource model source by index
+    - [`GET /api/V/project/[PROJECT]/source/[INDEX]/resources`][GET /api/V/project/[PROJECT]/source/[INDEX]/resources] - Get Nodes content from a specific resource model source by index
+    - [`POST /api/V/project/[PROJECT]/source/[INDEX]/resources`][POST /api/V/project/[PROJECT]/source/[INDEX]/resources] - Update Nodes content for a specific Writeable resource model source by index
+* Updated Endpoints.
+    - [`GET /api/V/project/[PROJECT]/resources`][/api/V/project/[PROJECT]/resources] - Default response format is `application/json` for API v23 and later
+    - [`GET /api/V/project/[PROJECT]/resource/[NAME]`][/api/V/project/[PROJECT]/resource/[NAME]] - Default response format is `application/json` for API v23 and later
+    
+**Version 22**:
+
+* Updated Endpoints.
+    - [`GET /api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]/input`][/api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]/input] - Include Job `status`, and `deleted` whether the job file was deleted for Import integration
+    - [`POST /api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]`][/api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]] - Can include `deletedJobs` to delete jobs for Import integration.
+
 **Version 21**:
 
 * Removed Endpoints.
@@ -2168,7 +2190,7 @@ Note: If neither `groupPath` nor `groupPathExact` are specified, then the defaul
     <project>Project Name</project>
     <description>...</description>
 </job>
-~~~~~~~~~~~~
+~~~~~~~~~~
 
 `Content-Type: application/json`
 
@@ -2187,7 +2209,7 @@ Note: If neither `groupPath` nor `groupPathExact` are specified, then the defaul
     "enabled": true/false
   }
 ]
-~~~~~~~~~~~~
+~~~~~~~~~~
 
 **Since v17**:
 
@@ -2213,7 +2235,7 @@ In Cluster mode, additional information about what server UUID is the schedule o
     <project>Project Name</project>
     <description>...</description>
 </job>
-~~~~~~~~~~~~
+~~~~~~~~~~
 
 `Content-Type: application/json`
 
@@ -2234,7 +2256,7 @@ In Cluster mode, additional information about what server UUID is the schedule o
     "serverOwner": true/false
   }
 ]
-~~~~~~~~~~~~
+~~~~~~~~~~
 
 
 ### Running a Job
@@ -2280,6 +2302,47 @@ and this format is expected in the content:
 
 (**API v18** or later): The `options` entry can contain a map of option name -> value, in which case the `argString` is ignored.
 
+
+**Response**:
+
+See [Listing Running Executions](#listing-running-executions).
+
+### Retry a Job based on execution
+
+Retry a failed execution on failed nodes only or on the same as the execution.
+This is the same functionality as the `Retry Failed Nodes ...` button on the execution page.
+
+**Request:**
+
+    POST /api/24/job/[ID]/retry/[EXECID]
+
+Optional parameters. 
+All of this parameters are going to be populated with the execution values unless they are included in the call:
+
+* `argString`: argument string to pass to the job, of the form: `-opt value -opt2 value ...`.
+* `loglevel`: argument specifying the loglevel to use, one of: 'DEBUG','VERBOSE','INFO','WARN','ERROR'
+* `asUser` : specifies a username identifying the user who ran the job. Requires `runAs` permission.
+* `option.OPTNAME`: Option value for option named `OPTNAME`. If any `option.OPTNAME` parameters are specified,
+    the `argString` value is ignored.
+* `failedNodes` : `false` to run on the same nodes as the original execution, `true`or empty to run only on failed nodes.
+
+
+If the request has `Content-Type: application/json`, then the parameters will be ignored,
+and this format is expected in the content:
+
+~~~~~ {.json}
+{
+    "argString":"...",
+    "loglevel":"...",
+    "asUser":"...",
+    "options": {
+        "myopt1":"value",
+        ...
+    }
+}
+~~~~~
+
+The `options` entry can contain a map of option name -> value, in which case the `argString` is ignored.
 
 **Response**:
 
@@ -5036,16 +5099,124 @@ Response will indicate whether the imported contents had any errors:
 
 ### Updating and Listing Resources for a Project
 
-Update or retrieve the Resources for a project.  A GET request returns the resources
-for the project, and a POST request will update the resources. (**API version 2** required.)
+Update or retrieve the Resources or Sources for a project. 
+
+Each Project can have multiple resource Sources.  Sources can be read-only, or writeable.
+
+Use [/api/V/project/[PROJECT]/resources][] to get all resources from a project.
+
+Use [/api/V/project/[PROJECT]/sources][] to get all Sources from a project.  Individual Sources
+can be retrieved, or their Resources
 
 #### List Resources for a Project
+
+A GET request returns all the resources for the project.
 
 **Request:**
 
     GET /api/2/project/[PROJECT]/resources
 
 See [Listing Resources](#listing-resources).
+
+#### List Resource Model Sources for a Project
+
+**Request:**
+
+    GET /api/23/project/[PROJECT]/sources
+
+**Response:**
+
+The response contains a set of `source` objects, each describes the `index`, the `type`, and details about the `resources`. If the
+source had any error, that is included as `errors`.
+
+Resources data includes any `description` provided by the source, whether it is `empty`, and
+whether it is `writeable`.  The `href` indicates the URL for [Listing and Updating the resources for the source][/api/V/project/[PROJECT]/source/[INDEX]/resources].
+
+`application/json`
+
+~~~ {.json}
+[
+    {
+        "index": 1,
+        "resources": {
+            "description": "/Users/greg/rundeck2.11/projects/atest/etc/resources.xml",
+            "empty": false,
+            "href": "http://ecto1.local:4440/api/23/project/atest/source/1/resources",
+            "writeable": true
+        },
+        "type": "file"
+    },
+    {
+        "errors": "File does not exist: /Users/greg/rundeck2.11/projects/atest/etc/resources2.xml",
+        "index": 2,
+        "resources": {
+            "href": "http://ecto1.local:4440/api/23/project/atest/source/2/resources",
+            "writeable": false
+        },
+        "type": "stub"
+    }
+]
+~~~
+
+`application/xml`
+
+~~~ {.xml}
+<?xml version="1.0" encoding="utf-8"?>
+<sources project="atest" count="2">
+  <source index="1" type="file">
+    <resources href="http://ecto1.local:4440/api/23/project/atest/source/1/resources"
+    writeable="true" empty="false">
+      <description>
+      /Users/greg/rundeck2.11/projects/atest/etc/resources.xml</description>
+    </resources>
+  </source>
+  <source index="2" type="stub">
+    <resources href="http://ecto1.local:4440/api/23/project/atest/source/2/resources"
+    writeable="false" />
+     <errors>File does not exist:
+    /Users/greg/rundeck2.11/projects/atest/etc/resources2.xml</errors>
+  </source>
+</sources>
+~~~
+
+#### Get a Resource Model Source for a Project
+
+**Request:**
+
+    GET /api/23/project/[PROJECT]/source/[INDEX]
+
+**Response:**
+
+A single `source` for the given index, as described in [List Resource Model Sources For a Project][/api/V/project/[PROJECT]/sources].
+
+#### List Resources of a Resource Model Source
+
+**Request:**
+
+    GET /api/23/project/[PROJECT]/source/[INDEX]/resources
+
+**Response:**
+
+Based on the `Accept:` header, the resource model data for the source.
+
+* See [Listing Resources](#listing-resources).
+
+#### Update Resources of a Resource Model Source
+
+**Request:**
+
+    POST /api/23/project/[PROJECT]/source/[INDEX]/resources
+    Content-Type: [TYPE]
+
+    [RESOURCE MODEL DATA]
+
+Specify the `Content-Type` header, with a value such as `application/json` or `application/xml` or any supported resource model format.
+
+**Response:**
+
+The resource model data in the format requested via the `Accept:` header.
+
+* See [Listing Resources](#listing-resources).
 
 ### Project Readme File
 
@@ -5225,7 +5396,7 @@ The `events` element will also have `max`, `offset`, and `total` attributes, to 
 <events count="8" total="268" max="20" offset="260">
 ...
 </events>
-~~~~ {.xml}
+~~~~
 
 `total` is the total number of events matching the query parameters.
 `count` is the number of events included in the results.
@@ -5292,9 +5463,14 @@ List or query the resources for a project.
 
 Optional Parameters:
 
-* `format` : Result format. Default is "xml", can use "yaml" or "json", or an installed ResourceFormat plugin name.  
-
+* `format` : Result format. Can use "xml", "yaml" or "json", or an installed ResourceFormat plugin name.  
+    * Default is 'json' (API v23 and later)
+    * Default is 'xml' (API v22 and earlier)
 * Node Filter parameters: You can select resources to include and exclude in the result set, see [Using Node Filters](#using-node-filters) below.
+
+Accept header: 
+
+Specify a MIME type via the `Accept:` header to specify the requested format.
 
 **Note:** If no query parameters are included, the result set will include all Node resources for the project.
 
@@ -5314,7 +5490,9 @@ Get a specific resource within a project.
 
 Optional Parameters:
 
-* `format` : Result format.  Default is "xml", can use "yaml" or "json", or an installed ResourceFormat plugin name.
+* `format` : Result format. Can use "xml", "yaml" or "json", or an installed ResourceFormat plugin name.  
+    * Default is 'json' (API v23 and later)
+    * Default is 'xml' (API v22 and earlier)
 
 **Response:**
 
@@ -5831,6 +6009,7 @@ The content of `<scmPluginInputField>` is the same as shown in [Get SCM Plugin I
 * `deleted` - boolean, whether the job was deleted and requires deleting the associated repo item
 * `renamed` - boolean if the job was renamed
 * `originalId` - ID of a repo item if the job was renamed and now is stored at a different repo path, or empty/null
+* `status` - file status String, the same value as in the `$synchState` of [Get Job SCM Status](#get-job-scm-status).
 
 `scmImportActionItem` values:
 
@@ -5840,6 +6019,8 @@ The content of `<scmPluginInputField>` is the same as shown in [Get SCM Plugin I
     * `jobId` job ID
     * `jobName` job name
 * `tracked` - boolean, true if there is an associated `job`
+* `deleted` - boolean, whether the job was deleted on remote and requires to be deleted
+* `status` - file status String, the same value as in the `$synchState` of [Get Job SCM Status](#get-job-scm-status).
 
 
 
@@ -5855,6 +6036,7 @@ The content of `<scmPluginInputField>` is the same as shown in [Get SCM Plugin I
   <importItems>
     <!-- import only -->
     <scmImportActionItem>
+      <deleted>$boolean</deleted>
       <itemId>$string</itemId>
       <job>
         <!-- job tag may be empty if no associated job-->
@@ -5863,6 +6045,7 @@ The content of `<scmPluginInputField>` is the same as shown in [Get SCM Plugin I
           <jobName>$jobname</jobName>
       </job>
       <tracked>$boolean</tracked>
+      <status>$string</status>
     </scmImportActionItem>
   </importItems>
   <exportItems>
@@ -5877,6 +6060,7 @@ The content of `<scmPluginInputField>` is the same as shown in [Get SCM Plugin I
       </job>
       <originalId>$string</originalId>
       <renamed>$boolean</renamed>
+      <status>$string</status>
     </scmExportActionItem>
   </exportItems>
 </scmActionInput>
@@ -5898,13 +6082,15 @@ The content of `"fields"` array is the same as shown in [Get SCM Plugin Input Fi
   "title": "$string",
   "importItems": [
     {
+      "deleted": $boolean,
       "itemId": "$string",
       "job": {
         "groupPath": "$jobgroup",
         "jobId": "$jobid",
         "jobName": "$jobname"
       },
-      "tracked": $boolean
+      "tracked": $boolean,
+      "status": "$string"
     }
   ],
   "exportItems": [
@@ -5917,7 +6103,8 @@ The content of `"fields"` array is the same as shown in [Get SCM Plugin Input Fi
         "jobName": "$jobname"
       },
       "originalId": "$string",
-      "renamed": $boolean
+      "renamed": $boolean,
+      "status": "$string"
     }
   ]
 }
@@ -5934,8 +6121,11 @@ expect a set of `input` values.
 The set of `jobs` and `items` to choose from will be included in the Input Fields response,
 however where an Item has an associated Job, you can supply either the Job ID, or the Item ID.
 
-When there are items to be deleted (`export` integration), you can specify the Item IDs in the `deleted`
+When there are items to be deleted on `export` integration, you can specify the Item IDs in the `deleted`
 section.  However, if the item is associated with a renamed Job, including the Job ID will have the same effect.
+
+When there are items to be deleted on `import` integration, you must specify the Job IDs in the `deletedJobs`
+section.
 
 Note: including the Item ID of an associated job, instead of the Job ID,
 will not automatically delete a renamed item.
@@ -5958,7 +6148,12 @@ will not automatically delete a renamed item.
     <items>
         <item itemId="$itemId"/>
     </items>
-    <deleted></deleted>
+    <deleted>
+        <item itemId="$itemId"/>
+    </deleted>
+    <deletedJobs>
+        <job jobId="$jobId"/>
+    </deletedJobs>
 </scmAction>
 ~~~~~~~~~~
 
@@ -5975,7 +6170,12 @@ will not automatically delete a renamed item.
     "items":[
         "$itemId"
     ],
-    "deleted":null
+    "deleted":[
+        "$itemId"
+    ],
+    "deletedJobs":[
+        "$jobId"
+    ]
 }
 ~~~~~~~~~~
 
@@ -6236,6 +6436,9 @@ Same response as [Setup SCM Plugin for a Project](#setup-scm-plugin-for-a-projec
 
 * `GET` [List Files Uploaded for a Job](#list-files-uploaded-for-a-job)
 
+[/api/V/job/[ID]/retry/[EXECID]][]
+
+* `POST` [Retry a Job Based on Execution](#retry-a-job-based-on-execution)
 
 [/api/V/execution/[ID]/input/files][]
 
@@ -6423,6 +6626,19 @@ Same response as [Setup SCM Plugin for a Project](#setup-scm-plugin-for-a-projec
 
 * `GET` [Get Project SCM Action Input Fields.][/api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]/input]
 
+[/api/V/project/[PROJECT]/sources][]
+
+* `GET` [List Resource Model Sources for a Project][/api/V/project/[PROJECT]/sources]
+
+[/api/V/project/[PROJECT]/source/[INDEX]][]
+
+* `GET` [Get a Resource Model Source for a Project][GET /api/V/project/[PROJECT]/source/[INDEX]]
+
+[/api/V/project/[PROJECT]/source/[INDEX]/resources][]
+
+* `GET` [List Resources for a Resource Model Source][GET /api/V/project/[PROJECT]/source/[INDEX]/resources]
+* `POST` [Update Resources for a Resource Model Source][POST /api/V/project/[PROJECT]/source/[INDEX]/resources]
+
 [/api/V/projects][]
 
 * `GET` [Listing Projects](#listing-projects)
@@ -6520,6 +6736,13 @@ Same response as [Setup SCM Plugin for a Project](#setup-scm-plugin-for-a-projec
 [/api/V/project/[PROJECT]/scm/[INTEGRATION]/config]:#get-project-scm-config
 [/api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]]:#perform-project-scm-action
 [/api/V/project/[PROJECT]/scm/[INTEGRATION]/action/[ACTION_ID]/input]:#get-project-scm-action-input-fields
+
+[/api/V/project/[PROJECT]/sources]:#list-resource-model-sources-for-a-project
+[/api/V/project/[PROJECT]/source/[INDEX]]:#get-a-resource-model-source-for-a-project
+[/api/V/project/[PROJECT]/source/[INDEX]/resources]:#list-resources-of-a-resource-model-source
+[GET /api/V/project/[PROJECT]/source/[INDEX]/resources]:#list-resources-of-a-resource-model-source
+[POST /api/V/project/[PROJECT]/source/[INDEX]/resources]:#update-resources-of-a-resource-model-source
+
 [/api/V/job/[ID]/scm/[INTEGRATION]/status]:#get-job-scm-status
 [/api/V/job/[ID]/scm/[INTEGRATION]/action/[ACTION_ID]]:#perform-job-scm-action
 [/api/V/job/[ID]/scm/[INTEGRATION]/action/[ACTION_ID]/input]:#get-job-scm-action-input-fields
@@ -6558,6 +6781,9 @@ Same response as [Setup SCM Plugin for a Project](#setup-scm-plugin-for-a-projec
 
 [POST /api/V/job/[ID]/executions]:#running-a-job
 [DELETE /api/V/job/[ID]/executions]:#delete-all-executions-for-a-job
+
+[/api/V/job/[ID]/retry/[EXECID]]:#retry-a-job-based-on-execution
+[POST /api/V/job/[ID]/retry/[EXECID]]:#retry-a-job-based-on-execution
 
 [/api/V/job/[ID]/info]:#get-job-metadata
 [GET /api/V/job/[ID]/info]:#get-job-metadata

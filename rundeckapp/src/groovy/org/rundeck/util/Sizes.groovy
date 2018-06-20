@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Rundeck, Inc. (http://rundeck.com)
+ * Copyright 2018 Rundeck, Inc. (http://rundeck.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ class Sizes {
         null
     }
 
-    static final Map<String, Long> TIME_UNITS = [s: 1, m: 60, h: 60 * 60, d: 24 * 60 * 60, y: 365 * 24 * 60 * 60]
+    static final Map<String, Long> TIME_UNITS = [s: 1, m: 60, h: 60 * 60, d: 24 * 60 * 60,w: 7 * 24 * 60 * 60, y: 365 * 24 * 60 * 60]
     /**
      * Return the timeout duration in seconds for a timeout string in the form "1d2h3m15s" etc
      * @param time
@@ -83,7 +83,7 @@ class Sizes {
      * @return
      */
     public static boolean validTimeDuration(String time) {
-        def matcher = (time =~ /(\d+)([smhdy])?/)
+        def matcher = (time =~ /(\d+)([smhdwy])?/)
         return matcher.matches()
     }
 }

@@ -15,7 +15,7 @@
   --}%
  <%--
     _pluginConfigProperty.gsp
-    
+
     Author: Greg Schueler <a href="mailto:greg@dtosolutions.com">greg@dtosolutions.com</a>
     Created: 7/28/11 12:01 PM
  --%>
@@ -38,13 +38,13 @@
        value="${prop.scope != null && prop.scope != PropertyScope.Unspecified ? prop.scope : defaultScope}"/>
 <g:unless test="${outofscopeOnly && propScope == PropertyScope.InstanceOnly}">
 <div class="form-group ${enc(attr:hasError)}">
-
 <g:if test="${outofscope}">
     <label class="${labelColType} form-control-static ${error?'has-error':''}  ${prop.required ? 'required' : ''}">
         <stepplugin:message
                 service="${service}"
                 name="${provider}"
                 code="${messagePrefix}property.${prop.name}.title"
+                messagesType="${messagesType}"
                 default="${prop.title ?: prop.name}"/>:
     </label>
 </g:if>
@@ -62,6 +62,7 @@
                         service="${service}"
                         name="${provider}"
                         code="${messagePrefix}property.${prop.name}.title"
+                        messagesType="${messagesType}"
                         default="${prop.title ?: prop.name}"/>
             </label>
         </div>
@@ -74,6 +75,7 @@
             service="${service}"
             name="${provider}"
             code="${messagePrefix}property.${prop.name}.title"
+            messagesType="${messagesType}"
             default="${prop.title ?: prop.name}"/></label>
 
     <g:hiddenField name="${origfieldname}" value="${values&&values[prop.name]?values[prop.name]:''}"/>
@@ -84,7 +86,8 @@
         </div>
         <div class="${valueColTypeSplitB}">
             <g:set var="propSelectLabels" value="${prop.selectLabels ?: [:]}"/>
-            <g:set var="propSelectValues" value="${prop.selectValues.collect {
+            <g:set var="selectValues" value="${dynamicProperties ?: (prop.selectValues ?: [:])}"/>
+            <g:set var="propSelectValues" value="${selectValues.collect {
                 [key: it.encodeAsHTML(), value: (propSelectLabels[it] ?: it)]
             }}"/>
         <g:select name="${fieldid+'_sel'}" from="${propSelectValues}" id="${fieldid}"
@@ -98,8 +101,14 @@
     </g:if>
     <g:else>
         <g:set var="propSelectLabels" value="${prop.selectLabels ?: [:]}"/>
+        <g:set var="selectValues" value="${dynamicProperties ?: (prop.selectValues ?: [:])}"/>
         <g:set var="propSelectValues"
-               value="${prop.selectValues.collect { [key: it.encodeAsHTML(), value: (propSelectLabels[it] ?: it)] }}"/>
+               value="${selectValues.collect { [key: it.encodeAsHTML(), value: stepplugin.messageText(
+                   service: service,
+                   name: provider,
+                   messagesType:messagesType,
+                   code: (messagePrefix?:'')+'property.' + prop.name + '.options.'+it+'.label',
+                   default:propSelectLabels[it] ?: it)] }}"/>
         <g:set var="noSelectionValue" value="${prop.required ? null : ['':'-none selected-']}"/>
         <div class="${valueColType}">
         <g:select name="${fieldname}" from="${propSelectValues}" id="${fieldid}"
@@ -117,13 +126,20 @@
                 service="${service}"
                 name="${provider}"
                 code="${messagePrefix}property.${prop.name}.title"
+                messagesType="${messagesType}"
                 default="${prop.title ?: prop.name}"/></label>
 
         <g:hiddenField name="${origfieldname}" value="${values && values[prop.name] ? values[prop.name] : ''}"/>
 
         <g:set var="propSelectLabels" value="${prop.selectLabels ?: [:]}"/>
+        <g:set var="selectValues" value="${dynamicProperties ?: (prop.selectValues ?: [:])}"/>
         <g:set var="propSelectValues"
-               value="${prop.selectValues.collect { [value: it, label: (propSelectLabels[it] ?: it)] }}"/>
+               value="${selectValues.collect { [value: it.encodeAsHTML(), label: stepplugin.messageText(
+                   service: service,
+                   name: provider,
+                   code: (messagePrefix?:'')+'property.' + prop.name + '.options.'+it+'.label',
+                   messagesType:messagesType,
+                   default:propSelectLabels[it] ?: it)] }}"/>
         <g:set var="noSelectionValue" value="${prop.required ? null : ['': '-none selected-']}"/>
 
 <g:set var="defval" value="${values && null != values[prop.name] ? values[prop.name] : prop.defaultValue}"/>
@@ -156,6 +172,7 @@
             service="${service}"
             name="${provider}"
             code="${messagePrefix}property.${prop.name}.title"
+            messagesType="${messagesType}"
             default="${prop.title ?: prop.name}"/></label>
     <div class="${hasStorageSelector? valueColTypeSplit80: valueColType}">
     <g:hiddenField name="${origfieldname}" value="${values&&values[prop.name]?values[prop.name]:''}"/>
@@ -184,7 +201,8 @@
                     stepplugin.messageText(
                             service: service,
                             name: provider,
-                            code: 'property.' + prop.name + '.defaultValue',
+                            code: (messagePrefix?:'')+'property.' + prop.name + '.defaultValue',
+                            messagesType:messagesType,
                             default: prop.defaultValue
                     )
         }"/>
@@ -225,9 +243,10 @@
                                        model="[description: stepplugin.messageText(
                                                service: service,
                                                name: provider,
-                                               code: 'property.' + prop.name + '.description',
+                                               messagesType: messagesType,
+                                               code: (messagePrefix?:'')+'property.' + prop.name + '.description',
                                                default: prop.description
-                                       ), , textCss       : '',
+                                       ),  textCss       : '',
                                                mode       : 'collapsed', rkey: g.rkey()]"/></div>
     <g:if test="${error}">
         <div class="text-warning"><g:enc>${error}</g:enc></div>

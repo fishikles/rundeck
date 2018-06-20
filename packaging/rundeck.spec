@@ -33,8 +33,8 @@ Rundeck provides a single console for dispatching commands across many resources
 	- Run the service as the rundeck user.
 
 %pre
-getent group rundeck >/dev/null || groupadd rundeck
-getent passwd rundeck >/dev/null || useradd -d /var/lib/rundeck -m -g rundeck rundeck
+getent group rundeck >/dev/null || groupadd -r rundeck
+getent passwd rundeck >/dev/null || useradd -r -d /var/lib/rundeck -m -g rundeck rundeck
 
 %post
 if [ ! -e ~rundeck/.ssh/id_rsa ]; then
@@ -108,7 +108,7 @@ fi
 /var/lib/rundeck/cli/commons-lang-2.6.jar
 /var/lib/rundeck/cli/commons-logging-1.2.jar
 /var/lib/rundeck/cli/dom4j-2.1.0.jar
-/var/lib/rundeck/cli/guava-15.0.jar
+/var/lib/rundeck/cli/guava-24.1.1-jre.jar
 /var/lib/rundeck/cli/jaxen-1.1.6.jar
 /var/lib/rundeck/cli/jna-4.1.0.jar
 /var/lib/rundeck/cli/jna-platform-4.1.0.jar
@@ -126,13 +126,14 @@ fi
 /var/lib/rundeck/cli/rundeck-storage-conf-%{_vname}.jar
 /var/lib/rundeck/cli/rundeck-storage-data-%{_vname}.jar
 /var/lib/rundeck/cli/snakeyaml-1.9.jar
-/var/lib/rundeck/cli/jackson-annotations-2.8.10.jar
-/var/lib/rundeck/cli/jackson-core-2.8.10.jar
-/var/lib/rundeck/cli/jackson-databind-2.8.10.jar
+/var/lib/rundeck/cli/jackson-annotations-2.8.11.jar
+/var/lib/rundeck/cli/jackson-core-2.8.11.jar
+/var/lib/rundeck/cli/jackson-databind-2.8.11.1.jar
 /var/lib/rundeck/cli/converter-jackson-2.2.0.jar
 /var/lib/rundeck/cli/okhttp-3.6.0.jar
 /var/lib/rundeck/cli/okio-1.11.0.jar
 /var/lib/rundeck/cli/retrofit-2.2.0.jar
+/var/lib/rundeck/cli/protobuf-java-3.5.1.jar
 
 
 
