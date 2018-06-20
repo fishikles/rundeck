@@ -1,12 +1,14 @@
 #!/bin/bash
 
+set -euo pipefail
+
 . common.sh
 
 export DOCKER_COMPOSE_SPEC=${DOCKER_COMPOSE_SPEC:-docker-compose-api-test.yml}
 export SETUP_TEST_PROJECT=test
 
-if [ -f rundeck-launcher.jar ] ; then
-	mv rundeck-launcher.jar dockers/rundeck/data/
+if [ -f rundeck-launcher.war ] ; then
+	mv rundeck-launcher.war dockers/rundeck/data/
 fi
 
 if [ -f rd.deb ] ; then
@@ -31,7 +33,7 @@ echo "up completed, running tests..."
 set +e
 
 docker-compose -f $DOCKER_COMPOSE_SPEC exec -T --user rundeck rundeck1 \
-	bash scripts/run_api_tests.sh /home/rundeck/api_test $TEST_NAME
+	bash scripts/run_api_tests.sh /home/rundeck/api_test
 
 EC=$?
 echo "run_tests.sh finished with: $EC"

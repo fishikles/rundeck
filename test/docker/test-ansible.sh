@@ -1,13 +1,15 @@
 #!/bin/bash
 
+set -euo pipefail
+
 . common.sh
 
 export DOCKER_COMPOSE_SPEC=docker-compose-ansible-test.yaml
 export TEST_DIR=/home/rundeck/ansible-tests/ansible
 export TEST_SCRIPT=/home/rundeck/ansible-tests/run-tests.sh
 
-if [ -f rundeck-launcher.jar ] ; then
-	mv rundeck-launcher.jar dockers/rundeck/data/
+if [ -f rundeck-launcher.war ] ; then
+	mv rundeck-launcher.war dockers/rundeck/data/
 fi
 
 if [ -f rd.deb ] ; then

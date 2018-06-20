@@ -18,6 +18,9 @@ package rundeck
 
 import com.dtolabs.rundeck.app.support.ExecutionContext
 import com.dtolabs.rundeck.core.common.FrameworkResource
+import com.dtolabs.rundeck.core.dispatcher.DataContextUtils
+import com.google.gson.Gson
+import groovy.json.JsonOutput
 import org.quartz.Calendar
 import org.quartz.TriggerUtils
 import org.quartz.impl.calendar.BaseCalendar
@@ -48,8 +51,6 @@ class ScheduledExecution extends ExecutionContext {
 
     Workflow workflow
 
-    def scheduledExecutionService
-
     Date nextExecution
     boolean scheduled = false
     Boolean nodesSelectedByDefault = true
@@ -66,17 +67,31 @@ class ScheduledExecution extends ExecutionContext {
     String notifyStartUrl
     String notifyAvgDurationRecipients
     String notifyAvgDurationUrl
+    String notifyRetryableFailureRecipients
+    String notifyRetryableFailureUrl
     Boolean multipleExecutions = false
     Orchestrator orchestrator
+    String serverNodeUUID
+
+    String notifyAvgDurationThreshold
 
     String timeZone
 
     Boolean scheduleEnabled = true
     Boolean executionEnabled = true
 
+    Integer nodeThreadcount=1
+    String nodeThreadcountDynamic
+    Long refExecCount=0
+
+    String defaultTab
+
+    String maxMultipleExecutions
+
     static transients = ['userRoles','adhocExecutionType','notifySuccessRecipients','notifyFailureRecipients',
                          'notifyStartRecipients', 'notifySuccessUrl', 'notifyFailureUrl', 'notifyStartUrl',
-                         'crontabString','averageDuration','notifyAvgDurationRecipients','notifyAvgDurationUrl']
+                         'crontabString','averageDuration','notifyAvgDurationRecipients','notifyAvgDurationUrl',
+                         'notifyRetryableFailureRecipients','notifyRetryableFailureUrl']
 
     static constraints = {
         project(nullable:false, blank: false, matches: FrameworkResource.VALID_RESOURCE_NAME_REGEX)
@@ -108,9 +123,8 @@ class ScheduledExecution extends ExecutionContext {
         loglevel(nullable:true)
         totalTime(nullable:true)
         execCount(nullable:true)
-        nodeThreadcount(nullable:true,validator:{val,obj->
-            return null==val||val>=1
-        })
+        nodeThreadcount(nullable:true)
+        refExecCount(nullable:true)
         nodeRankOrderAscending(nullable:true)
         nodeRankAttribute(nullable:true)
         argString(nullable:true)
@@ -150,6 +164,10 @@ class ScheduledExecution extends ExecutionContext {
         timeZone(maxSize: 256, blank: true, nullable: true)
         retryDelay(nullable:true)
         successOnEmptyNodeFilter(nullable: true)
+        nodeThreadcountDynamic(nullable: true)
+        notifyAvgDurationThreshold(nullable: true)
+        defaultTab(maxSize: 256, blank: true, nullable: true)
+        maxMultipleExecutions(maxSize: 256, blank: true, nullable: true)
     }
 
     static mapping = {
@@ -179,10 +197,11 @@ class ScheduledExecution extends ExecutionContext {
         timeout(type: 'text')
         retry(type: 'text')
         retryDelay(type: 'text')
+        notifyAvgDurationThreshold(type: 'text')
     }
 
     static namedQueries = {
-		isScheduled {
+		scheduledJobs {
 			eq 'scheduled', true
 		}
 		withServerUUID { uuid ->
@@ -264,6 +283,9 @@ class ScheduledExecution extends ExecutionContext {
         if(timeZone){
             map.timeZone=timeZone
         }
+        if(defaultTab){
+            map.defaultTab = defaultTab
+        }
 
         if(options){
             map.options = []
@@ -288,9 +310,12 @@ class ScheduledExecution extends ExecutionContext {
         if(multipleExecutions){
             map.multipleExecutions=true
         }
+        if(maxMultipleExecutions){
+            map.maxMultipleExecutions = maxMultipleExecutions
+        }
         if(doNodedispatch){
             map.nodesSelectedByDefault = hasNodesSelectedByDefault()
-            map.nodefilters=[dispatch:[threadcount:null!=nodeThreadcount?nodeThreadcount:1,
+            map.nodefilters=[dispatch:[threadcount:rawThreadCountValue(),
                                        keepgoing:nodeKeepgoing?true:false,
                                        successOnEmptyNodeFilter:successOnEmptyNodeFilter?true:false,
                                        excludePrecedence:nodeExcludePrecedence?true:false]]
@@ -332,6 +357,8 @@ class ScheduledExecution extends ExecutionContext {
                             map.notification[it.eventTrigger].plugin.sort { a, b -> a.type <=> b.type }
                 }
             }
+
+            map.notifyAvgDurationThreshold = notifyAvgDurationThreshold
         }
         return map
     }
@@ -368,6 +395,7 @@ class ScheduledExecution extends ExecutionContext {
             se.retryDelay = data.retryDelay?.toString()
         }
         se.timeZone = data.timeZone?data.timeZone.toString():null
+        se.defaultTab = data.defaultTab?data.defaultTab.toString():null
         if(data.options){
             TreeSet options=new TreeSet()
             if(data.options instanceof Map) {
@@ -434,10 +462,13 @@ class ScheduledExecution extends ExecutionContext {
         if(data.multipleExecutions){
             se.multipleExecutions=data.multipleExecutions?true:false
         }
+        if(data.maxMultipleExecutions){
+            se.maxMultipleExecutions=data.maxMultipleExecutions
+        }
         if(data.nodefilters){
             se.nodesSelectedByDefault = null!=data.nodesSelectedByDefault?(data.nodesSelectedByDefault?true:false):true
             if(data.nodefilters.dispatch){
-                se.nodeThreadcount = data.nodefilters.dispatch.threadcount ?: 1
+                se.nodeThreadcountDynamic = data.nodefilters.dispatch.threadcount ?: "1"
                 if(data.nodefilters.dispatch.containsKey('keepgoing')){
                     se.nodeKeepgoing = data.nodefilters.dispatch.keepgoing
                 }
@@ -509,6 +540,11 @@ class ScheduledExecution extends ExecutionContext {
                 }
             }
             se.notifications=nots
+
+            if(null!=data.notifyAvgDurationThreshold){
+                se.notifyAvgDurationThreshold = data.notifyAvgDurationThreshold
+            }
+
         }
         return se
     }
@@ -567,11 +603,20 @@ class ScheduledExecution extends ExecutionContext {
     }
 
     public setUserRoles(List l){
-        setUserRoleList(l.join(","))
+        def json = JsonOutput.toJson(l)
+        setUserRoleList(json)
     }
+
     public List getUserRoles(){
         if(userRoleList){
-            return Arrays.asList(userRoleList.split(/,/))
+            //check if the string is a valid JSON
+            try {
+                Gson gson = new Gson()
+                return gson.fromJson(userRoleList, List.class)
+            } catch(com.google.gson.JsonSyntaxException ex) {
+                return Arrays.asList(userRoleList.split(/,/))
+            }
+
         }else{
             return []
         }
@@ -579,10 +624,6 @@ class ScheduledExecution extends ExecutionContext {
 
     def boolean hasScheduleEnabled() {
         return (null == scheduleEnabled || scheduleEnabled)
-    }
-
-    def shouldScheduleExecutionProject(){
-        return scheduledExecutionService.shouldScheduleInThisProject(project)
     }
 
     def boolean shouldScheduleExecution() {
@@ -922,6 +963,21 @@ class ScheduledExecution extends ExecutionContext {
     }
 
     /**
+     * Find all ScheduledExecutions with the given uuid
+     * @param uuid
+     * @return
+     */
+    static List findAllScheduledExecutions(String uuid){
+        def c = ScheduledExecution.createCriteria()
+        def schedlist = c.list {
+            and {
+                eq('uuid', uuid)
+            }
+        }
+        return schedlist
+    }
+
+    /**
      * Find a ScheduledExecution by UUID or ID.  Checks if the
      * input value is a Long, if so finds the ScheduledExecution with that ID.
      * If it is a String it attempts to parse the String as a Long and if it is
@@ -955,8 +1011,13 @@ class ScheduledExecution extends ExecutionContext {
      * @param project
      * @return
      */
-    static ScheduledExecution findScheduledExecution(String group, String name, String project) {
-        def schedlist = ScheduledExecution.findAllScheduledExecutions(group,name,project)
+    static ScheduledExecution findScheduledExecution(String group, String name, String project, String extid=null) {
+        def schedlist
+        if(extid){
+            schedlist = ScheduledExecution.findAllByUuid(extid)
+        }else{
+            schedlist = ScheduledExecution.findAllScheduledExecutions(group,name,project)
+        }
         if(schedlist && 1 == schedlist.size()){
             return schedlist[0]
         }else{
@@ -988,18 +1049,51 @@ class ScheduledExecution extends ExecutionContext {
         return 0;
     }
 
-    /**
-     * Retrun a list of dates in a time lapse between now and the to Date.
-     * @param to Date in the future
-     * @return list of dates
-     */
-    List<Date> nextExecutions(Date to){
-        def trigger = scheduledExecutionService.createTrigger(this)
-        Calendar cal = new BaseCalendar()
-        if(timeZone){
-            cal.setTimeZone(TimeZone.getTimeZone(timeZone))
+    //new threadcount value that can be defined using an option value
+    Integer getNodeThreadcount() {
+        if(null!=nodeThreadcount && null==nodeThreadcountDynamic){
+            return nodeThreadcount
         }
-        return TriggerUtils.computeFireTimesBetween(trigger, cal, new Date(), to)
+
+        def nodeThreadcountValue=nodeThreadcountDynamic
+
+        if (nodeThreadcountDynamic?.contains('${')) {
+            //replace data references
+            if (options) {
+                def defaultoptions=[:]
+                options.each {Option opt ->
+                    if (opt.defaultValue) {
+                        defaultoptions[opt.name]=opt.defaultValue
+                    }
+                }
+
+                nodeThreadcountValue = DataContextUtils.replaceDataReferencesInString(nodeThreadcountDynamic, DataContextUtils.addContext("option", defaultoptions, null)).trim()
+            }
+        }
+
+        if(null!=nodeThreadcountValue){
+            if(nodeThreadcountValue.isInteger()){
+                return Integer.valueOf(nodeThreadcountValue)
+            }else{
+                return null
+            }
+        }else{
+            return null
+        }
+
     }
+
+    String rawThreadCountValue() {
+        if(null!=nodeThreadcount && null==nodeThreadcountDynamic){
+            return nodeThreadcount.toString()
+        }else{
+            if(null==nodeThreadcountDynamic){
+                return "1"
+            }else{
+                return nodeThreadcountDynamic
+            }
+        }
+    }
+
 }
 

@@ -1,13 +1,15 @@
 #!/bin/bash
 
+set -euo pipefail
+
 export RUNDECK_VERSION=${RUNDECK_VERSION:-2.9.2}
 export LAUNCHER_URL=${LAUNCHER_URL:-http://dl.bintray.com/rundeck/rundeck-maven/rundeck-launcher-${RUNDECK_VERSION}.jar}
 export CLI_DEB_URL=${CLI_DEB_URL:-https://dl.bintray.com/rundeck/rundeck-deb}
 export CLI_VERS=${CLI_VERS:-1.0.15-1}
 
 build_rdtest_docker(){
-	if [ -f rundeck-launcher.jar ] ; then
-		mv rundeck-launcher.jar dockers/rundeck/data/
+	if [ -f rundeck-launcher.war ] ; then
+		mv rundeck-launcher.war dockers/rundeck/data/
 	fi
 
 	if [ -f rd.deb ] ; then
@@ -15,7 +17,6 @@ build_rdtest_docker(){
 	fi
 
 	# setup test dirs
-	mkdir dockers/rundeck/api_test
 	cp -r ../src dockers/rundeck/api_test/
 	cp -r ../api dockers/rundeck/api_test/
 	

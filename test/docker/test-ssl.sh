@@ -1,11 +1,13 @@
 #!/bin/bash
 
+set -euo pipefail
+
 . common.sh
 
 export DOCKER_COMPOSE_SPEC=docker-compose-ssl-test.yml
 
-if [ -f rundeck-launcher.jar ] ; then
-	mv rundeck-launcher.jar dockers/rundeck/data/
+if [ -f rundeck-launcher.war ] ; then
+	mv rundeck-launcher.war dockers/rundeck/data/
 fi
 
 if [ -f rd.deb ] ; then
