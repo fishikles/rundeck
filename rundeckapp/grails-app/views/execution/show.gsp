@@ -79,14 +79,57 @@
         .errmsg {
             color: gray;
         }
+        .executionshow.affix:before,
+        .executionshow.affix:after {
+            content: " ";
+            display: table;
+        }
+        .executionshow.affix:after {
+            clear: both;
+        }
+        .executionshow .runoutput {
+            display: none;
+        }
+        .executionshow.affix .runoutput {
+            display: block;
+        }
+        .executionshow.affix {
+            top: 0;
+            width: 80%;
+            z-index: 1;
+            margin-right: auto;
+            margin-left: auto;
+            padding-left: 15px;
+            padding-right: 15px;
+            padding-top: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #eeeeee;
+        }
+        .executionshow.affix.panel-heading-affix {
+            background-color: #eeeeee;
+            width: auto;
+            margin: 0 15px;
+            padding: 8px 10px;
+        }
+        .affixed-shown {
+            display: none;
+        }
+        .affix .affixed-shown {
+            display: block;
+            margin-top: 0px;
+            margin-left: 15px;
+        }
+        .affix .affixed-shown.affixed-shown-inline {
+            display: inline;
+        }
       </style>
   </head>
   <g:set var="isAdhoc" value="${!scheduledExecution && execution.workflow.commands.size() == 1}"/>
   <body id="executionShowPage">
     <div class="container-fluid">
       <div id="execution_main">
-        <div class="executionshow_wrap">
-          <div class="executionshow">
+        <div class="executionshow_wrap" data-affix="wrap">
+          <div class="executionshow" data-affix="top" data-affix-padding-top="21">
             <div class="row">
             %{--job or adhoc title--}%
               <div class="col-sm-7">
@@ -202,10 +245,10 @@
                                   <div class="modal-footer">
                                     <g:form controller="execution" action="delete" method="post" useToken="true">
                                       <g:hiddenField name="id" value="${execution.id}"/>
-                                      <button type="submit" class="btn btn-default btn-sm " data-dismiss="modal">
+                                      <button type="submit" class="btn btn-default btn-xs " data-dismiss="modal">
                                         <g:message code="cancel" />
                                       </button>
-                                      <input type="submit" value="${g.message(code:'button.action.Delete')}" class="btn btn-danger btn-sm"/>
+                                      <input type="submit" value="${g.message(code:'button.action.Delete')}" class="btn btn-danger btn-xs"/>
                                     </g:form>
                                   </div>
                                 </div>
@@ -214,15 +257,8 @@
                           </g:if>
                           %{--/delete execution modal--}%
 
-                          %{--scroll up shown only when scroll affix happens--}%
-                          <!--
-                          <div class="affixed-shown pull-right">
-                            <a class="btn btn-default textbtn-on-hover btn-xs" href="#top">
-                              <g:message code="scroll.to.top" />
-                              <i class="glyphicon glyphicon-arrow-up"></i>
-                            </a>
-                          </div>
-                          -->
+
+
                         </div>
                       </div>
                         <div class="card-footer">
@@ -230,7 +266,7 @@
                               <div data-bind="if: canKillExec()">
                                   <span data-bind="visible: !completed() ">
                                       <!-- ko if: !killRequested() || killStatusFailed() -->
-                                          <span class="btn btn-danger btn-sm"
+                                          <span class="btn btn-danger btn-xs"
                                                 data-bind="click: killExecAction">
                                               <g:message code="button.action.kill.job" />
                                               <i class="glyphicon glyphicon-remove"></i>
@@ -243,7 +279,7 @@
                                       <span class="loading" data-bind="text: killStatusText"></span>
                                       <!-- /ko -->
                                       <!-- ko if: killedbutNotSaved() -->
-                                      <span class="btn btn-danger btn-sm"
+                                      <span class="btn btn-danger btn-xs"
                                             data-bind="click: markExecAction">
                                           <g:message code="button.action.incomplete.job" default="Mark as Incomplete"/>
                                           <i class="glyphicon glyphicon-remove"></i>
@@ -284,14 +320,14 @@
                                       >
 
                                           <b class="glyphicon glyphicon-play"></b>
-                                          <g:message code="execution.action.runAgain"/>&hellip;
+                                          <g:message code="execution.action.runAgain"/>
                                       </g:link>
                                           %{--run again and retry failed --}%
                                       <div class="btn-group execRetry"
                                            style="${wdgt.styleVisible(if: null != execution.dateCompleted && null!=execution.failedNodeList )}"
                                            data-bind="visible: failed()"
                                       >
-                                          <button class="btn btn-default btn-sm dropdown-toggle force-last-child" data-target="#"
+                                          <button class="btn btn-default btn-xs dropdown-toggle force-last-child" data-target="#"
                                                   data-toggle="dropdown">
                                               <g:message code="execution.action.runAgain" />
                                               <i class="caret"></i>
@@ -330,7 +366,7 @@
 
                               <g:if test="${deleteExecAuth}">
                                   <div class="spacing" data-bind="visible: completed()">
-                                      <a href="#execdelete" class="btn-simple btn-sm btn btn-danger "
+                                      <a href="#execdelete" class="btn-simple btn-xs btn btn-danger "
                                          data-toggle="modal">
                                           <b class="glyphicon glyphicon-remove-circle"></b>
                                           <g:message code="button.action.delete.this.execution" />
@@ -359,7 +395,7 @@
                                       <div class="btn-group execRetry"
                                            style="${wdgt.styleVisible(if: null != execution.dateCompleted && null != execution.failedNodeList)};"
                                            data-bind="visible: failed()">
-                                          <button class="btn btn-default btn-sm dropdown-toggle"
+                                          <button class="btn btn-default btn-xs dropdown-toggle"
                                                   data-target="#"
                                                   data-toggle="dropdown">
                                               <g:message code="execution.action.runAgain" />
@@ -407,6 +443,14 @@
 
                               </div>
                           </g:else>
+                        %{--scroll up shown only when scroll affix happens--}%
+
+                            <div class="affixed-shown">
+                                <a class="btn btn-default textbtn-on-hover btn-xs" href="#top">
+                                    <g:message code="scroll.to.top" />
+                                    <i class="glyphicon glyphicon-arrow-up"></i>
+                                </a>
+                            </div>
                         </div>
                       </div>
                   </div>
@@ -416,9 +460,8 @@
 
               <g:if test="${execution.scheduledExecution}">
               %{--progress bar--}%
-                  <div class="row row-space" data-bind="if: !completed()">
+                  <div class="row" data-bind="if: !completed()">
                   <div class="col-sm-12">
-                    <h4>Running</h4>
                       <section class="runstatus " data-bind="if: !completed() && jobAverageDuration()>0">
                           <g:set var="progressBind" value="${', css: { \'progress-bar-info\': jobPercentageFixed() < 105 ,  \'progress-bar-warning\': jobPercentageFixed() > 104  }'}"/>
                           <g:render template="/common/progressBar"
@@ -673,7 +716,7 @@
         updatepagetitle:${enc(js:null == execution?.dateCompleted)},
         killjobauth:${enc(js: authChecks[AuthConstants.ACTION_KILL] ? true : false)},
       <g:if test="${authChecks[AuthConstants.ACTION_KILL]}">
-          killjobhtml: '<span class="btn btn-danger btn-sm textbtn" onclick="followControl.docancel();">Kill <g:message code="domain.ScheduledExecution.title"/> <i class="glyphicon glyphicon-remove"></i></span>',
+          killjobhtml: '<span class="btn btn-danger btn-xs textbtn" onclick="followControl.docancel();">Kill <g:message code="domain.ScheduledExecution.title"/> <i class="glyphicon glyphicon-remove"></i></span>',
       </g:if>
       <g:if test="${!authChecks[AuthConstants.ACTION_KILL]}">
           killjobhtml: "",

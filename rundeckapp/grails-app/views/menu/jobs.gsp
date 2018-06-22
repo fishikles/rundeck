@@ -23,6 +23,8 @@
     <meta name="tabpage" content="jobs"/>
     <g:set var="projectName" value="${params.project ?: request.project}"></g:set>
     <g:set var="projectLabel" value="${session.frameworkLabels?session.frameworkLabels[projectName]:projectName}"/>
+    <g:set var="paginateJobs" value="${grailsApplication.config.rundeck.gui.paginatejobs}" />
+    <g:set var="paginateJobsPerPage" value="${grailsApplication.config.rundeck.gui.paginatejobs.max.per.page}" />
     <title><g:message code="gui.menu.Workflows"/> - <g:enc>${projectLabel}</g:enc></title>
 
     <asset:javascript src="util/yellowfade.js"/>
@@ -212,159 +214,8 @@
             }
         }
 
-        /////////////
-        // Job context detail popup code
-        /////////////
-
-        var doshow=false;
-        var popvis=false;
-        var lastHref;
-        var targetLink;
-        function popJobDetails(elem){
-            if(doshow && $('jobIdDetailHolder')){
-                new MenuController().showRelativeTo(elem,$('jobIdDetailHolder'));
-                popvis=true;
-                if(targetLink){
-                    $(targetLink).removeClassName('glow');
-                    targetLink=null;
-                }
-                $(elem).addClassName('glow');
-                targetLink=elem;
-            }
-        }
-        var motimer;
-        var mltimer;
-        function bubbleMouseover(evt){
-            if(mltimer){
-                clearTimeout(mltimer);
-                mltimer=null;
-            }
-        }
-        function jobLinkMouseover(elem,evt){
-            if(mltimer){
-                clearTimeout(mltimer);
-                mltimer=null;
-            }
-            if(motimer){
-                clearTimeout(motimer);
-                motimer=null;
-            }
-            if(popvis && lastHref===elem.href){
-                return;
-            }
-            var delay=1500;
-            if(popvis){
-                delay=0;
-            }
-            motimer=setTimeout(showJobDetails.curry(elem),delay);
-        }
-        function doMouseout(){
-            if(popvis && $('jobIdDetailHolder')){
-                popvis=false;
-                Try.these(
-                    function(){
-                        jQuery('#jobIdDetailHolder').fadeOut('fast');
-                    },
-                    function(){$('jobIdDetailHolder').hide();}
-                    );
-            }
-            if(targetLink){
-                $(targetLink).removeClassName('glow');
-                targetLink=null;
-            }
-        }
-        function jobLinkMouseout(elem,evt){
-            //hide job details
-            if(motimer){
-                clearTimeout(motimer);
-                motimer=null;
-            }
-            doshow=false;
-            mltimer=setTimeout(doMouseout,0);
-        }
-        function showJobDetails(elem){
-            //get url
-            var href=elem.href || elem.getAttribute('data-href');
-            lastHref=href;
-            doshow=true;
-            //match is id
-            var matchId = jQuery(elem).data('jobId');
-            if(!matchId){
-                return;
-            }
-            var viewdom=$('jobIdDetailHolder');
-            var bcontent=$('jobIdDetailContent');
-            if(viewdom){
-                viewdom.parentNode.removeChild(viewdom);
-                viewdom=null;
-            }
-            if(!viewdom){
-                viewdom = $(document.createElement('div'));
-                viewdom.addClassName('bubblewrap');
-                viewdom.setAttribute('id','jobIdDetailHolder');
-                viewdom.setAttribute('style','display:none;width:600px;height:250px;');
-
-                Event.observe(viewdom,'click',function(evt){
-                    evt.stopPropagation();
-                },false);
-
-                var btop = new Element('div');
-                btop.addClassName('bubbletop');
-                viewdom.appendChild(btop);
-                bcontent = new Element('div');
-                bcontent.addClassName('bubblecontent');
-                bcontent.setAttribute('id','jobIdDetailContent');
-                viewdom.appendChild(bcontent);
-                document.body.appendChild(viewdom);
-                Event.observe(viewdom,'mouseover',bubbleMouseover);
-                Event.observe(viewdom,'mouseout',jobLinkMouseout.curry(viewdom));
-            }
-            bcontent.loading();
-            var jobNodeFilters;
-            jQuery.ajax({
-                dataType:'json',
-                url:_genUrl(appLinks.scheduledExecutionDetailFragmentAjax, {id: matchId}),
-                success:function(data,status,xhr){
-                    var params={};
-                    if(data.job && data.job.doNodeDispatch) {
-                        if (data.job.filter) {
-                            params.filter = data.job.filter;
-                        }
-                    }else{
-                        params.localNodeOnly=true;
-                        params.emptyMode='localnode';
-                    }
-                    jobNodeFilters=initJobNodeFilters(params);
-                }
-            }).done(
-                    function(){
-                        jQuery('#jobIdDetailContent').load(_genUrl(appLinks.scheduledExecutionDetailFragment, {id: matchId}),
-                                function(response,status,xhr){
-                            if (status=='success') {
-                                var wrapDiv = jQuery('#jobIdDetailHolder').find('.ko-wrap')[0];
-                                if(wrapDiv) {
-                                    ko.applyBindings(jobNodeFilters, wrapDiv);
-                                }
-                                popJobDetails(elem);
-                                $('jobIdDetailContent').select('.apply_ace').each(function (t) {
-                                    _applyAce(t);
-                                });
-                            }else{
-                                clearHtml(bcontent);
-                                viewdom.hide();
-                            }
-                        });
-                    }
-            );
-
-        }
 
         function initJobIdLinks(){
-            $$('.hover_show_job_info').each(function(e){
-                Event.observe(e,'mouseover',jobLinkMouseover.curry(e));
-                Event.observe(e,'mouseout',jobLinkMouseout.curry(e));
-            });
-
             jQuery('.act_job_action_dropdown').click(function(){
                 var id=jQuery(this).data('jobId');
                 var el=jQuery(this).parent().find('.dropdown-menu');
@@ -407,17 +258,6 @@
             });
 
 
-            Event.observe(document.body,'click',function(evt){
-                //click outside of popup bubble hides it
-                doMouseout();
-            },false);
-            Event.observe(document,'keydown',function(evt){
-                //escape key hides popup bubble
-                if(evt.keyCode===27 ){
-                    doMouseout();
-                }
-                return true;
-            },false);
 
             $$('.obs_filtertoggle').each(function(e) {
                 Event.observe(e, 'click', filterToggle);
@@ -870,6 +710,8 @@
         #histcontent table{
             width:100%;
         }
+        .gsp-pager .step { padding: 0 2px; }
+        .gsp-pager .currentStep { padding: 0 2px; }
     </style>
 </head>
 <body>
@@ -909,6 +751,7 @@
         </div>
         <div class="card-content">
           <div class="runbox primary jobs" id="indexMain">
+            <g:set var="wasfiltered" value="${paginateParams?.keySet().grep(~/(?!proj).*Filter|groupPath|idlist$/)}"/>
             <g:render template="workflowsFull"
                       model="${[
                           jobExpandLevel    : jobExpandLevel,
@@ -925,10 +768,21 @@
                           sortEnabled       : true,
                           rkey              : rkey,
                           clusterModeEnabled: clusterModeEnabled
-                      ]}"/>             
+                      ]}"/>
               <div id="error" class="alert alert-danger" style="display:none;"></div>
           </div>
+          <g:if test="${paginateJobs && !wasfiltered}">
+          <div>
+            Showing ${offset+max > total ? total : offset+max} of ${total}
+          </div>
+           <div class="gsp-pager">
+            <g:paginate next="Next" prev="Previous" max="${paginateJobsPerPage}"
+            controller="menu" maxsteps="10"
+            action="jobs" total="${total}" params="${[max:params.max,offset:params.offset,project:params.project]}" />
+            </div>
+            </g:if>
         </div>
+
       </div>
     </div>
   </div>

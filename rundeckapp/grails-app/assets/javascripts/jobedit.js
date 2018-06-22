@@ -564,6 +564,7 @@ function _hideWFItemControls(item) {
     jQuery('#workflowContent').find('span.wfitemcontrols').hide();
     jQuery('#wfundoredo,#wfnewbutton').hide();
     _iseditting=item;
+    _disableWfDragdrop();
 }
 function _updateEmptyMessage() {
     var x = jQuery('#workflowContent').find('ol li');
@@ -720,53 +721,116 @@ function _updateWFUndoRedo() {
 
 
 ///Drag drop
-function moveDragItem(dragged, droparea) {
-    var num = jQuery(dragged).data('wfitemnum');
-    var to = jQuery(droparea).data('wfitemnum');
+var wfDragger;
+var wfDragDropSelect = "#workflowContent ol>li";
 
-    if (to > num) {
-        to = to - 1;
-    }
-
-    _doMoveItem(num, to);
+function _disableWfDragdrop() {
+    jQuery(wfDragDropSelect).attr('draggable', false);
+    jQuery(wfDragDropSelect).off();
 }
 function _enableWFDragdrop() {
     "use strict";
-    _enableDragdrop("#workflowContent ol>li","workflowDropfinal",moveDragItem);
+
+    wfDragger = _enableDragdrop(
+        wfDragDropSelect,
+        null,
+        function (elem) {
+            return jQuery.extend({}, jQuery(elem).data());
+        },
+        function (datafrom, datato) {
+            if (datafrom.wfitemnum < datato.wfitemnum) {
+                return 'hoverActiveDown';
+            } else if (datafrom.wfitemnum > datato.wfitemnum) {
+                return 'hoverActiveUp';
+            }
+            return null;
+        },
+        ['hoverActiveUp', 'hoverActiveDown'],
+        function (from, to) {
+            _doMoveItem(from.wfitemnum, to.wfitemnum);
+        }
+    );
 }
-function _enableDragdrop(select, finalid, callback) {
-    $$(select).each(function (item) {
-        new Draggable(
-            item,
-            {
-                revert: 'failure',
-                ghosting: false,
-                constraint: 'vertical',
-                handle: 'dragHandle',
-                scroll: window,
-                onStart: function (d) {
-                    $(finalid).show();
-                },
-                onEnd: function (d) {
-                    $(finalid).hide();
-                }
-            }
+
+function _enableDragdrop(select, finalid, getdata, hovercss, allcss, callback) {
+    var dragger = {
+        //data from drag source
+        dragged    : null,
+        //currently dragged source elem
+        draggedElem: null,
+        //array of drop elements
+        allowed    : []
+    };
+
+    var dragStart = function (evt) {
+        dragger.draggedElem = evt.originalEvent.target;
+        dragger.dragged = getdata(evt.originalEvent.target);
+        evt.originalEvent.dataTransfer.dropEffect = 'move';
+        evt.originalEvent.dataTransfer.effectAllowed = 'move';
+
+        if (finalid) {
+            jQuery("#" + finalid).show();
+        }
+    };
+    var allowDrop = function (evt) {
+        if (!dragger.draggedElem) {
+            //not currently dragging one of my expected draggables
+            return;
+        }
+        if (evt.originalEvent.currentTarget === dragger.draggedElem) {
+            return;
+        }
+        evt.preventDefault();
+        var css = hovercss(
+            dragger.dragged,
+            getdata(evt.originalEvent.currentTarget)
         );
-        Droppables.add(item, {
-                hoverclass: 'hoverActive',
-                onDrop: callback
-            }
-        );
-        $(item).addClassName("ready");
-    });
-    $$('#' + finalid).each(function (item) {
-        Droppables.add(item, {
-                hoverclass: 'hoverActive',
-                onDrop: callback
-            }
-        );
-        $(item).addClassName("ready");
-    });
+
+        if (css) {
+            jQuery(evt.originalEvent.currentTarget).addClass(css);
+        }
+    };
+    var dragend = function (evt) {
+        jQuery(dragger.allowed).removeClass(allcss.join(' '));
+        if (finalid) {
+            jQuery("#" + finalid).hide();
+        }
+        dragger.draggedElem = null;
+    };
+    var dragleave = function (evt) {
+        evt.preventDefault();
+        jQuery(evt.originalEvent.target).removeClass(allcss.join(' '));
+    };
+    var drop = function (evt) {
+        evt.preventDefault();
+        var fromdata = dragger.dragged;
+        var todata = getdata(evt.delegateTarget);
+        jQuery(dragger.allowed).off();
+        dragend();
+        callback(jQuery.extend({}, fromdata), jQuery.extend({}, todata));
+    };
+
+
+    dragger.allowed = jQuery(select).toArray();
+
+
+    jQuery(select).attr('draggable', 'true')
+                  .on('dragstart', dragStart)
+                  .on('dragover', allowDrop)
+                  .on('dragleave', dragleave)
+                  .on('dragend', dragend)
+                  .on('drop', drop);
+    if (finalid) {
+        var finalElem = jQuery("#" + finalid);
+        dragger.allowed.push(finalElem[0]);
+        finalElem
+            .on('dragover', allowDrop)
+            .on('drop', drop)
+            .on('dragleave', dragleave)
+            .on('dragend', dragend)
+            .addClass('ready');
+    }
+    return dragger;
 }
 /** end wf edit code */
 
@@ -812,9 +876,34 @@ function _showOptControls() {
     clearHtml('optsload');
 }
 
+var optsDragger;
+
+var optsDragDropSelect = "#optionContent ul>li";
+
+function _disableOptDragdrop() {
+    jQuery(optsDragDropSelect).attr('draggable', false).off();
+    jQuery("#optionDropFinal").attr('draggable', false).off();
+}
 function _enableOptDragDrop(){
     "use strict";
-    _enableDragdrop('#optionContent ul>li','optionDropFinal',_dragReorderOption);
+    optsDragger = _enableDragdrop(
+        optsDragDropSelect,
+        'optionDropFinal',
+        function (elem) {
+            return jQuery.extend({}, jQuery(elem).data());
+        },
+        function (datafrom, datato) {
+            if (datato.isFinal) {
+                return 'hoverActiveAll';
+            } else if (datafrom.optName !== datato.optName) {
+                return 'hoverActiveUp';
+            }
+            return null;
+        },
+
+        ['hoverActiveUp', 'hoverActiveAll'],
+        _dragReorderOption
+    );
 }
 function _showOptEmptyMessage() {
     var x = $('optionsContent').down('ul li');
@@ -830,6 +919,7 @@ function _hideOptControls() {
     $$('#optionsContent .opteditcontrols').each(Element.hide);
     $('optnewbutton').hide();
     clearHtml('optsload');
+    _disableOptDragdrop();
 }
 function _updateOptsUndoRedo() {
     var params = {};
@@ -1031,19 +1121,18 @@ function _doRemoveOption(name, elem,tokendataid) {
         }
     );
 }
-function _dragReorderOption(dragged,drop){
+
+function _dragReorderOption(fromData, toData) {
     "use strict";
-    var optName = jQuery(dragged).data('optName');
-    var toOptName = jQuery(drop).data('optName');
     var data={};
-    if(!toOptName && jQuery(drop).data('isFinal')){
+    if (!toData.optName && toData.isFinal) {
         data={end:true};
     }else{
-        data={before:toOptName};
+        data = {before: toData.optName};
     }
 
 
-    _doReorderOption(optName, data);
+    _doReorderOption(fromData.optName, data);
 
 }
 function _doReorderOption(name,data) {
