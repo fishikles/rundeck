@@ -230,7 +230,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -284,7 +286,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -309,7 +313,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -334,7 +340,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -359,7 +367,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -384,7 +394,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -409,7 +421,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -434,7 +448,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -486,7 +502,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -515,7 +533,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -544,7 +564,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobExecutionItem)
         JobExecutionItem testcommand=(JobExecutionItem) test
@@ -574,7 +596,9 @@ class ExecutionItemFactoryTest {
                 'anotherProject',
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobRefCommand)
         JobRefCommand testcommand=(JobRefCommand) test
@@ -705,7 +729,9 @@ class ExecutionItemFactoryTest {
                 null,
                 true,
                 false,
-                null
+                null,
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobRefCommand)
         JobRefCommand testcommand=(JobRefCommand) test
@@ -732,7 +758,9 @@ class ExecutionItemFactoryTest {
                 null,
                 false,
                 false,
-                'bd80d431-b70a-42ad-8ea8-37ad4885ea0d'
+                'bd80d431-b70a-42ad-8ea8-37ad4885ea0d',
+                false,
+                false
         )
         Assert.assertTrue(test instanceof JobRefCommand)
         JobRefCommand testcommand=(JobRefCommand) test
@@ -744,22 +772,24 @@ class ExecutionItemFactoryTest {
   @Test
   public void createJobRef_with_import_options() {
       StepExecutionItem test = ExecutionItemFactory.createJobRef(
-          "monkey/piece",
-          ['args', 'args2'] as String[],
-          true,
-          null,
-          true,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          null,
-          false,
-          true,
-          null
+              "monkey/piece",
+              ['args', 'args2'] as String[],
+              true,
+              null,
+              true,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              null,
+              false,
+              true,
+              null,
+              false,
+              false
       )
       Assert.assertTrue(test instanceof JobRefCommand)
       JobRefCommand testcommand = (JobRefCommand) test

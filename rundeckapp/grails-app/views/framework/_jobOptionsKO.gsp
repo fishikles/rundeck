@@ -61,7 +61,7 @@ used by _editOptions.gsp template
                                               dateFormat         : optionSelect.dateFormat,
                                               optionType         : optionSelect.optionType,
 //                                              config             : optionSelect.configMap,
-                                              values             : optionSelect.values,
+                                              values             : optionSelect.optionValuesPluginType ? optionSelect.valuesFromPlugin.collect { it.value } : optionSelect.optionValues,
                                               defaultValue       : optionSelect.defaultValue,
                                               defaultStoragePath : optionSelect.defaultStoragePath,
                                               multivalued        : optionSelect.multivalued,
@@ -77,12 +77,14 @@ used by _editOptions.gsp template
                                               optionDepsMet      : !optiondependencies[optName] || selectedoptsmap &&
                                                       optiondependencies[optName].every { selectedoptsmap[it] },
                                               secureInput        : optionSelect.secureInput,
-                                              hasExtended        : !optionSelect.secureInput && (values || optionSelect.values ||
-                                                      optionSelect.multivalued),
+                                              hasExtended        : !optionSelect.secureInput && (values || optionSelect.optionValues ||
+                                                      optionSelect.multivalued || optionSelect.valuesFromPlugin),
                                               value              : selectedvalue ? selectedvalue :
                                                       selectedoptsmap && null != selectedoptsmap[optName] ?
                                                               selectedoptsmap[optName] :
-                                                              (optionSelect.defaultValue ?: '')
+                                                              (optionSelect.defaultValue ?: ''),
+                                              valuesFromPlugin   : optionSelect.valuesFromPlugin,
+                                              hidden     : !!optionSelect.hidden
                                       ]
                                   }
     ]}" id="jobOptionData"/>
@@ -99,59 +101,65 @@ data for configuring remote option cascading/dependencies
             </div>
         </div>
     </g:if>
-    
+
     <div id="_commandOptions" data-bind="foreach: {data: options(), as: 'option' }">
-        <div class="form-group " data-bind="
+        <div data-bind="visible: !hidden()">
+            <div class="form-group " data-bind="
     css: { 'has-warning': hasError, 'remote': hasRemote }
     ">
-            <label class="remoteoptionfield col-sm-2 control-label"
-                   data-bind="attr: { for: fieldId }, click: reloadRemoteValues">
-                <span data-bind="if: hasRemote()">
-                    <span data-bind="if: loading() ">
-                        <g:img class="loading-spinner" file="spinner-gray.gif" width="16px" height="16px"/>
+                <label class="remoteoptionfield col-sm-2 control-label"
+                       data-bind="attr: { for: fieldId }, click: reloadRemoteValues">
+                    <span data-bind="if: hasRemote()">
+                        <span data-bind="if: loading() ">
+                            <g:img class="loading-spinner" file="spinner-gray.gif" width="16px" height="16px"/>
+                        </span>
+                        <span class="remotestatus"
+                              data-bind=" css: {ok: !remoteError() && remoteValues().length>0 && remoteValues, error: remoteError()}">
+                        </span>
+                        <span data-bind="text: label"></span>
                     </span>
-                    <span class="remotestatus"
-                          data-bind=" css: {ok: !remoteError() && remoteValues().length>0 && remoteValues, error: remoteError()}">
+                    <span data-bind="if: !hasRemote()">
+                        <span data-bind="text: label"></span>
                     </span>
-                    <span data-bind="text: name"></span>
-                </span>
-                <span data-bind="if: !hasRemote()">
-                    <span data-bind="text: label"></span>
-                </span>
-            </label>
+                </label>
 
-            <div class=" col-sm-9">
+                <div class=" col-sm-9">
 
-                <g:render template="/framework/optionValuesSelectKO"/>
+                    <g:render template="/framework/optionValuesSelectKO"/>
 
-            </div>
+                </div>
 
-            <div class="col-sm-1">
-                <span data-bind="if: required">
-                    <span class="reqwarning has_tooltip"
-                          data-bind="attr: {title: hasError()||message('option.value.required') }, visible: !hasValue(), bootstrapTooltip: true"
-                          data-toggle="tooltip">
-                        <i class="glyphicon glyphicon-warning-sign"></i>
+                <div class="col-sm-1">
+                    <span data-bind="if: required">
+                        <span class="reqwarning has_tooltip"
+                              data-bind="attr: {title: hasError()||message('option.value.required') }, visible: !hasValue(), bootstrapTooltip: true"
+                              data-toggle="tooltip">
+                            <i class="glyphicon glyphicon-warning-sign"></i>
+                        </span>
                     </span>
-                </span>
-            </div>
+                </div>
 
-            <div class="col-sm-10 col-sm-offset-2">
-                %{--<span class="help-block" data-bind="text: description"></span>--}%
-                <span class="help-block" data-bind="html: descriptionHtml"></span>
-            </div>
+                <div class="col-sm-10 col-sm-offset-2">
+                    %{--<span class="help-block" data-bind="text: description"></span>--}%
+                    <span class="help-block" data-bind="html: descriptionHtml"></span>
+                </div>
 
-            <div class="col-sm-10 col-sm-offset-2" data-bind="if: hasError">
-                <p class="text-warning" data-bind="text: hasError"></p>
+                <div class="col-sm-10 col-sm-offset-2" data-bind="if: hasError">
+                    <p class="text-warning" data-bind="text: hasError"></p>
+                </div>
             </div>
         </div>
     </div>
 
 
-    <g:if test="${grails.util.Environment.current == grails.util.Environment.DEVELOPMENT}">
-        <div data-bind="foreach: {data: options(), as: 'option' }" class="text-primary">
-            <div><span data-bind="text: option.name"></span>=<span data-bind="text: option.value"></span></div>
-        </div>
+    <g:if test="${grails.util.Environment.current == grails.util.Environment.DEVELOPMENT && params.debug}">
+      <div class="col-xs-12 col-sm-10-col-sm-offset-2">
+        <div class="well">
+          <div data-bind="foreach: {data: options(), as: 'option' }" class="text-primary">
+              <div><span data-bind="text: option.name"></span>=<span data-bind="text: option.value"></span></div>
+          </div>
+        </div>        
+      </div>
     </g:if>
 
     <g:if test="${showDTFormat}">
@@ -206,14 +214,3 @@ data for configuring remote option cascading/dependencies
     <div class="info note">Not authorized to execute chosen job.</div>
     <g:if test="${selectedargstring}"><div>Old value: <g:enc>${selectedargstring}</g:enc></div></g:if>
 </g:elseif>
-<g:else>
-    <div class="form-group">
-        <div class="col-sm-2 control-label text-form-label">
-            <g:message code="input.options"/>
-        </div>
-
-        <div class="col-sm-10">
-            <p class="form-control-static text-primary"><g:message code="no.input.options.for.this.job"/></p>
-        </div>
-    </div>
-</g:else>

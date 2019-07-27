@@ -23,6 +23,7 @@
 */
 package com.dtolabs.rundeck.core.plugins;
 
+import com.dtolabs.rundeck.core.common.FrameworkSupportService;
 import com.dtolabs.rundeck.core.execution.script.ScriptfileUtils;
 import com.dtolabs.rundeck.core.execution.service.ProviderLoaderException;
 import com.dtolabs.rundeck.core.plugins.metadata.ProviderDef;
@@ -48,20 +49,25 @@ import static com.dtolabs.rundeck.core.plugins.JarPluginProviderLoader.RESOURCES
 /**
  * ScriptPluginProviderLoader can load a provider instance for a service from a script plugin zip file.
  *
+ * Services that want to use this loader need to implement {@link ScriptPluginProviderLoadable}
+ *
  * @author Greg Schueler <a href="mailto:greg@dtosolutions.com">greg@dtosolutions.com</a>
  */
-class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable, PluginResourceLoader, PluginMetadata {
+public class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable, PluginResourceLoader, PluginMetadata {
 
     private static final Logger log = Logger.getLogger(ScriptPluginProviderLoader.class.getName());
     public static final String VERSION_1_0 = "1.0";
     public static final String VERSION_1_1 = "1.1";
     public static final String VERSION_1_2 = "1.2";
+    public static final VersionCompare SUPPORTS_RESOURCES_PLUGIN_VERSION = VersionCompare.forString(VERSION_1_2);
+    public static final String VERSION_2_0 = "2.0";
     public static final List<String> SUPPORTED_PLUGIN_VERSIONS;
     static {
         SUPPORTED_PLUGIN_VERSIONS = Collections.unmodifiableList(Arrays.asList(
                 VERSION_1_0,
                 VERSION_1_1,
-                VERSION_1_2
+                VERSION_1_2,
+                VERSION_2_0
         ));
     }
     private final File file;
@@ -88,6 +94,11 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
     public ScriptPluginProviderLoader(final File file, final File cachedir) {
         this.file = file;
         this.cachedir = cachedir;
+    }
+
+    @Override
+    public boolean canLoadForService(final FrameworkSupportService service) {
+        return service instanceof ScriptPluginProviderLoadable;
     }
 
     private PluginResourceLoader getResourceLoader() throws PluginException {
@@ -133,9 +144,10 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
      */
     public synchronized <T> T load(final PluggableService<T> service, final String providerName) throws
         ProviderLoaderException {
-        if (!service.isScriptPluggable()) {
+        if (!(service instanceof ScriptPluginProviderLoadable)) {
             return null;
         }
+        ScriptPluginProviderLoadable<T> loader =(ScriptPluginProviderLoadable<T>) service;
         final ProviderIdent ident = new ProviderIdent(service.getName(), providerName);
 
         if (null == pluginProviderDefs.get(ident)) {
@@ -165,9 +177,17 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
         }
         final ScriptPluginProvider scriptPluginProvider = pluginProviderDefs.get(ident);
 
+        try {
+            getResourceLoader().listResources();
+        } catch(IOException iex) {
+            throw new ProviderLoaderException(iex,service.getName(),providerName);
+        }
+        catch (PluginException e) {
+            throw new ProviderLoaderException(e, service.getName(), providerName);
+        }
         if (null != scriptPluginProvider) {
             try {
-                return service.createScriptProviderInstance(scriptPluginProvider);
+                return loader.createScriptProviderInstance(scriptPluginProvider);
             } catch (PluginException e) {
                 throw new ProviderLoaderException(e, service.getName(), providerName);
             }
@@ -200,6 +220,7 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
             return metadata;
         }
         metadata = loadMeta(file);
+        metadata.setId(PluginUtils.generateShaIdFromName(metadata.getName()));
         dateLoaded = new Date();
         return metadata;
     }
@@ -384,34 +405,63 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
     /**
      * Return true if loaded metadata about the plugin file is valid.
      */
-    static boolean validatePluginMeta(final PluginMeta pluginList, final File file) {
-        boolean valid = true;
+    static PluginValidation validatePluginMeta(final PluginMeta pluginList, final File file) {
+        PluginValidation.State state = PluginValidation.State.VALID;
+        if (pluginList == null) {
+            return PluginValidation.builder()
+                                   .message("No metadata")
+                                   .state(PluginValidation.State.INVALID)
+                                   .build();
+        }
+        List<String> messages = new ArrayList<>();
         if (null == pluginList.getName()) {
-            log.error("name not found in metadata: " + file.getAbsolutePath());
-            valid = false;
+            messages.add("'name' not found in metadata");
+            state = PluginValidation.State.INVALID;
         }
         if (null == pluginList.getVersion()) {
-            log.error("version not found in metadata: " + file.getAbsolutePath());
-            valid = false;
+            messages.add("'version' not found in metadata");
+            state = PluginValidation.State.INVALID;
         }
         if (null == pluginList.getRundeckPluginVersion()) {
-            log.error("rundeckPluginVersion not found in metadata: " + file.getAbsolutePath());
-            valid = false;
+            messages.add("'rundeckPluginVersion' not found in metadata");
+            state = PluginValidation.State.INVALID;
         } else if (!SUPPORTED_PLUGIN_VERSIONS.contains(pluginList.getRundeckPluginVersion())) {
-            log.error("rundeckPluginVersion: " + pluginList.getRundeckPluginVersion() + " is not supported: " + file
-                    .getAbsolutePath());
-            valid = false;
+            messages.add("'rundeckPluginVersion': \"" + pluginList.getRundeckPluginVersion() + "\" is not supported");
+            state = PluginValidation.State.INVALID;
+        }
+        if(pluginList.getRundeckPluginVersion().equals(VERSION_2_0)) {
+            List<String> validationErrors = new ArrayList<>();
+
+            PluginValidation.State
+                hostCompatState =
+                PluginMetadataValidator.validateTargetHostCompatibility(
+                    validationErrors,
+                    pluginList.getTargetHostCompatibility()
+                );
+            PluginValidation.State
+                versCompatState = PluginMetadataValidator.validateRundeckCompatibility(
+                validationErrors,
+                pluginList.getRundeckCompatibilityVersion()
+            );
+
+            messages.addAll(validationErrors);
+            state = state.or(hostCompatState)
+                         .or(versCompatState);
+
         }
         final List<ProviderDef> pluginDefs = pluginList.getPluginDefs();
         for (final ProviderDef pluginDef : pluginDefs) {
             try {
                 validateProviderDef(pluginDef);
             } catch (PluginException e) {
-                log.error(String.format("Invalid provider definition in file %s: %s", file, e.getMessage()));
-                valid = false;
+                messages.add(e.getMessage());
+                state = PluginValidation.State.INVALID;
             }
         }
-        return valid;
+        return PluginValidation.builder()
+                               .state(state)
+                               .messages(messages)
+                               .build();
     }
 
     /**
@@ -464,7 +514,10 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
      */
     private static String basename(final File file) {
         final String name = file.getName();
-        return name.substring(0, name.lastIndexOf("."));
+        if(name.contains(".")) {
+            return name.substring(0, name.lastIndexOf("."));
+        }
+        return name;
     }
 
     /**
@@ -615,10 +668,7 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
      * @return
      */
     public static boolean supportsResources(final PluginMeta pluginMeta) {
-        if (VERSION_1_2.equals(pluginMeta.getRundeckPluginVersion())) {
-            return true;
-        }
-        return false;
+        return VersionCompare.forString(pluginMeta.getRundeckPluginVersion()).atLeast(SUPPORTS_RESOURCES_PLUGIN_VERSION);
     }
 
     public List<String> getPluginResourcesList() throws IOException {
@@ -642,6 +692,16 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
     @Override
     public File getFile() {
         return file;
+    }
+
+    @Override
+    public String getPluginArtifactName() {
+        try {
+            return getPluginMeta().getName();
+        } catch (IOException e) {
+
+        }
+        return null;
     }
 
     @Override
@@ -689,7 +749,7 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
         try {
             String date = getPluginMeta().getDate();
             return new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssX").parse(date);
-        } catch (IOException | ParseException e) {
+        } catch (IOException | NullPointerException | ParseException e) {
 
         }
         return null;
@@ -698,5 +758,110 @@ class ScriptPluginProviderLoader implements ProviderLoader, FileCache.Expireable
     @Override
     public Date getDateLoaded() {
         return dateLoaded;
+    }
+
+    @Override
+    public String getPluginName() {
+        try {
+            return getPluginMeta().getName();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginDescription() {
+        try {
+            return getPluginMeta().getDescription();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginId() {
+        try {
+            return getPluginMeta().getId();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getRundeckCompatibilityVersion() {
+        try {
+            return getPluginMeta().getRundeckCompatibilityVersion();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getTargetHostCompatibility() {
+        try {
+            return getPluginMeta().getTargetHostCompatibility();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public List<String> getTags() {
+        try {
+            return getPluginMeta().getTags();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginLicense() {
+        try {
+            return getPluginMeta().getLicense();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginThirdPartyDependencies() {
+        try {
+            return getPluginMeta().getThirdPartyDependencies();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginSourceLink() {
+        try {
+            return getPluginMeta().getSourceLink();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginDocsLink() {
+        try {
+            return getPluginMeta().getDocsLink();
+        } catch (IOException e) {
+
+        }
+        return null;
+    }
+
+    @Override
+    public String getPluginType() {
+        return "script";
     }
 }

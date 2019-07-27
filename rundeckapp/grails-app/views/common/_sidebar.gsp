@@ -18,7 +18,7 @@
 <g:set var="selectParams" value="${[:]}"/>
 <g:set var="buildIdent" value="${servletContextAttribute(attribute: 'app.ident')}"/>
 <g:set var="appId" value="${g.appTitle()}"/>
-<g:if test="${pageScope._metaTabPage && pageScope._metaTabPage != 'configure'&& pageScope._metaTabPage != 'projectconfigure'}">
+<g:if test="${pageScope._metaTabPage && !(pageScope._metaTabPage in ['configure','projectconfigure','home'])}">
     <g:set var="selectParams" value="${[page: _metaTabPage,project:params.project?:request.project]}"/>
 </g:if>
 
@@ -27,8 +27,14 @@
 <g:set var="selectedclass" value="active"/>
 
 <g:set var="wfselected" value=""/>
-<ul class="nav">
+<ul id="sidebar-nav" class="nav">
+
 <g:if test="${request.getAttribute(RequestConstants.PAGE)}">
+    <g:ifPageProperty name='meta.tabpage'>
+        <g:ifPageProperty name='meta.tabpage' equals='projectHome'>
+            <g:set var="homeselected" value="${selectedclass}"/>
+        </g:ifPageProperty>
+    </g:ifPageProperty>
     <g:ifPageProperty name='meta.tabpage'>
         <g:ifPageProperty name='meta.tabpage' equals='jobs'>
             <g:set var="wfselected" value="${selectedclass}"/>
@@ -53,9 +59,11 @@
         </g:ifPageProperty>
     </g:ifPageProperty>
 </g:if>
+<g:if test="${session?.user && request.subject }">
+<g:set var="projectName" value="${params.project ?: request.project}"/>
 <g:if test="${session.frameworkProjects}">
     <li id="projectSelect">
-      <a href="#" data-toggle="collapse" href="javascript:void(0)">
+      <a href="#" data-toggle="collapse">
         <i class="fas fa-suitcase"></i>
         <p>
           <g:message code="gui.menu.Projects"/>
@@ -66,49 +74,39 @@
                   model="${[
                           projects    : session.frameworkProjects,
                           labels      : session.frameworkLabels,
-                          project     : params.project ?: request.project,
+                          project     : projectName,
                           selectParams: selectParams
                   ]}"/>
     </li>
 </g:if>
-<g:if test="${params.project ?: request.project}">
-    <li>
-      <g:link controller="menu" action="projectHome" params="[project: project ?: params.project ?: request.project]">
+<g:if test="${projectName}">
+    <li id="nav-project-dashboard-link" class="${enc(attr: homeselected)}">
+      <g:link controller="menu" action="projectHome" params="[project: project ?: projectName]">
       <i class="fas fa-clipboard-list"></i>
         <p>
           <g:message code="gui.menu.Dashboard"/>
-          <!--
-          <br>
-          <g:if test="${session.frameworkLabels}">
-              <small>
-                <g:enc>${project ?session.frameworkLabels[project]: params.project ?
-                      session.frameworkLabels[params.project]: request.project ?
-                      session.frameworkLabels[request.project]: 'Choose ...'}</g:enc>
-              </small>
-          </g:if>
-          -->
         </p>
       </g:link>
     </li>
-    <li class="${enc(attr: wfselected)}">
-        <g:link controller="menu" action="jobs" class=" toptab ${enc(attr: wfselected)}" params="[project: params.project ?: request.project]">
+    <li id="nav-jobs-link" class="${enc(attr: wfselected)}">
+        <g:link controller="menu" action="jobs" class=" toptab ${enc(attr: wfselected)}" params="[project: projectName]">
             <i class="fas fa-tasks"></i>
             <p>
               <g:message code="gui.menu.Workflows"/>
             </p>
         </g:link>
     </li>
-    <li class="${enc(attr:resselected)}">
-        <g:link controller="framework" action="nodes" class=" toptab ${enc(attr: resselected)}" params="[project: params.project ?: request.project]">
+    <li id="nav-nodes-link" class="${enc(attr:resselected)}">
+        <g:link controller="framework" action="nodes" class=" toptab ${enc(attr: resselected)}" params="[project: projectName]">
             <i class="fas fa-sitemap"></i>
             <p>
               <g:message code="gui.menu.Nodes"/>
             </p>
         </g:link>
     </li>
-    <g:if test="${auth.adhocAllowedTest(action: AuthConstants.ACTION_RUN, project: params.project ?: request.project)}">
-        <li class="${enc(attr: adhocselected)}">
-            <g:link controller="framework" action="adhoc" class=" toptab ${enc(attr: adhocselected)}" params="[project: params.project ?: request.project]">
+    <g:if test="${auth.adhocAllowedTest(action: AuthConstants.ACTION_RUN, project: projectName)}">
+        <li id="nav-commands-link" class="${enc(attr: adhocselected)}">
+            <g:link controller="framework" action="adhoc" class=" toptab ${enc(attr: adhocselected)}" params="[project: projectName]">
                 <i class="fas fa-terminal"></i>
                 <p>
                   <g:message code="gui.menu.Adhoc"/>
@@ -116,18 +114,35 @@
             </g:link>
         </li>
     </g:if>
-    <li class="${enc(attr: eventsselected)}">
-      <g:link controller="reports" action="index" class=" toptab ${enc(attr: eventsselected)}" params="[project: params.project ?: request.project]">
-        <i class="fas fa-history"></i>
-        <p>
-          <g:message code="gui.menu.Events"/>
-        </p>
-      </g:link>
-    </li>
+    <auth:resourceAllowed project="${projectName}" action="${[AuthConstants.ACTION_READ]}" kind="event">
+        <li id="nav-activity-link" class="${enc(attr: eventsselected)}">
+          <g:link controller="reports" action="index" class=" toptab ${enc(attr: eventsselected)}" params="[project: projectName]">
+            <i class="fas fa-history"></i>
+            <p>
+              <g:message code="gui.menu.Events"/>
+            </p>
+          </g:link>
+        </li>
+    </auth:resourceAllowed>
+    <g:if test="${params.project ?: request.project}">
+        <g:ifMenuItems type="PROJECT" project="${projectName}">
+        <li role="separator" class="divider"></li>
+            <g:forMenuItems type="PROJECT" var="item" project="${projectName}">
+            <li>
+                <a href="${enc(attr: item.getProjectHref(projectName))}"
+                   class=" toptab "
+                   title="${enc(attr: g.message(code: item.titleCode, default: item.title))}">
+                    <i class="${enc(attr: item.iconCSS ?: 'fas fa-plug')}"></i>
+                    <p><g:message code="${item.titleCode}" default="${item.title}"/></p>
+                </a>
+            </li>
+        </g:forMenuItems>
+    </g:ifMenuItems>
+    </g:if>
     <g:set var="projConfigAuth"
            value="${auth.resourceAllowedTest(
                    type: AuthConstants.TYPE_PROJECT,
-                   name: (params.project ?: request.project),
+                   name: (projectName),
                    action: [AuthConstants.ACTION_CONFIGURE,
                             AuthConstants.ACTION_ADMIN,
                             AuthConstants.ACTION_IMPORT,
@@ -139,7 +154,7 @@
     <g:set var="projACLAuth"
            value="${auth.resourceAllowedTest(
                    type: AuthConstants.TYPE_PROJECT_ACL,
-                   name: (params.project ?: request.project),
+                   name: (projectName),
                    action: [AuthConstants.ACTION_READ,
                             AuthConstants.ACTION_ADMIN],
                    any: true,
@@ -147,30 +162,31 @@
            )}"/>
 
     <g:if test="${projConfigAuth||projACLAuth}">
-        <li class="${enc(attr: projconfigselected)}" id="projectAdmin">
-          <a href="#" data-toggle="collapse" href="javascript:void(0)">
+
+        <g:ifPageProperty name='meta.projconfigselected'>
+            <script type="text/javascript">
+                jQuery(function () {
+                    jQuery('#nav-project-settings-${enc(js:g.pageProperty(name:"meta.projconfigselected"))}').addClass(
+                        'active');
+                })
+            </script>
+            <g:set var="projConfigOpen" value="${true}"/>
+        </g:ifPageProperty>
+
+        <li id="nav-project-settings">
+            <a href="#" data-toggle="collapse" class="${wdgt.css(if: projConfigOpen, then: 'subnav-open')}">
             <i class="fas fa-cogs"></i>
             <p>
-              <!-- <g:message code="Project"/> -->
               <g:message code="gui.menu.ProjectSettings"/>
               <b class="caret"></b>
             </p>
           </a>
-          <g:render template="/menu/sidebarProjectMenu"/>
+            <g:render template="/menu/sidebarProjectMenu" model="[projConfigOpen: projConfigOpen]"/>
         </li>
     </g:if>
 </g:if>
-  <li class="snapshot-version">
-    <span class="rundeck-version-identity"
-          data-version-string="${enc(attr: buildIdent)}"
-          data-version-date="${enc(attr: servletContextAttribute(attribute: 'version.date_short'))}"
-          data-app-id="${enc(attr: appId)}"></span>
-    <g:link controller="menu" action="welcome" class="version link-bare">
-        <g:appTitle/> ${buildIdent}
-    </g:link>
-  </li>
+</g:if>
 </ul>
-
 <g:if test="${request.getAttribute(RequestConstants.PAGE)}">
     <g:ifPageProperty name='meta.tabtitle'>
         <ul class="nav">
@@ -185,37 +201,76 @@
         </ul>
     </g:ifPageProperty>
 </g:if>
-<g:if test="${session?.user && request.subject }">
-    <g:ifExecutionMode passive="true">
-        <p class="navbar-text has_tooltip navbar-text-warning"
-           title="${g.message(code:'system.executionMode.description.passive')}"
-           data-toggle="tooltip"
-           data-placement="bottom"
-        >
-            <i class="glyphicon glyphicon-exclamation-sign"></i>
-            <g:message code="passive.mode" />
-        </p>
-        <auth:resourceAllowed action="${[AuthConstants.ACTION_ENABLE_EXECUTIONS,AuthConstants.ACTION_ADMIN]}" any="true" context="application" kind="system">
-            <g:form class="navbar-form navbar-left" controller="execution" action="executionMode" method="POST" useToken="true">
-                <g:hiddenField name="mode" value="active"/>
-                <g:hiddenField name="project" value="${params.project}"/>
-                <g:link action="executionMode"
-                        controller="menu"
-                        class="btn btn-default "
-                        title="${message(code:"action.executionMode.set.active.help")}"
-                >
-                    Change
-                </g:link>
-            </g:form>
-        </auth:resourceAllowed>
-    </g:ifExecutionMode>
-</g:if>
+<div id="sidebar-bottom" style="border-top: 1px solid #3c3c3c;">
+  <div id="community-news-notification">
+    <div class="sidebar-footer-line-item">
+      <g:if test="${grailsApplication.config.rundeck.communityNews.disabled in [true,'true']}">
+        <a href="https://www.rundeck.com/community-updates" target="_blank">
+          <div>
+            <i class="far fa-newspaper" style="margin-right:5px;"></i>
+            <span>Community News</span>
+          </div>
+        </a>
+      </g:if>
+      <g:else>
+        <g:link controller="communityNews" action="index">
+          <span id="community-news-notification-vue"></span>
+        </g:link>
+      </g:else>
+    </div>
+  </div>
+  <div id="version-notification-vue"></div>
+  <div id="snapshot-version" class="snapshot-version">
+    <span class="rundeck-version-identity"
+          data-version-string="${enc(attr: buildIdent)}"
+          data-version-date="${enc(attr: servletContextAttribute(attribute: 'version.date_short'))}"
+          data-app-id="${enc(attr: appId)}"
+          style="display:block;"></span>
+    <g:link controller="menu" action="welcome" class="version link-bare">
+        <g:appTitle/> ${buildIdent}
+    </g:link>
+  </div>
+</div>
+
 <g:javascript>
+
+
   jQuery(function(){
+    // Sets user preference on opening/closing the sidebar
+    jQuery('.navbar-minimize a').click(function(){
+
+      var key = 'sidebarClosed'
+      var sidebarClosed = jQuery('body').hasClass('sidebar-mini')
+
+      sidebarClosed = !sidebarClosed // if the sidebar has that class, we're flipping it for the save
+
+       jQuery.ajax({
+            url: _genUrl(appLinks.userAddFilterPref, {filterpref: key + "=" + sidebarClosed}),
+            method: 'POST',
+            beforeSend: _createAjaxSendTokensHandler('ui_token'),
+            success: function () {
+                // console.log("saved sidebar position" );
+            },
+            error: function (e) {
+               console.log("saving sidebar position failed: " + e);
+            }
+        })
+        .success(_createAjaxReceiveTokensHandler('ui_token'));
+    })
+    // Mobile Sidebar
     jQuery('.sidebar-wrapper a[data-toggle="collapse"]').click(function(){
       jQuery(this).next().slideToggle();
       jQuery(this).toggleClass('subnav-open');
     });
-
   })
+  // Sidebar - Perfect Sidebar Scroller
+  const ps = new PerfectScrollbar('.sidebar-wrapper', {
+    suppressScrollX: true
+  });
+
+  setTimeout(function(){
+    var announcementHeight = document.getElementById("sidebar-bottom").offsetHeight;
+    document.getElementById("sidebar-nav").style['marginBottom'] = announcementHeight.toString() + "px";
+  }, 500)
+
 </g:javascript>

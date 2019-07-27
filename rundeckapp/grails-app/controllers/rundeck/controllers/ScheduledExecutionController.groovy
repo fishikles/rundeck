@@ -26,9 +26,12 @@ import com.dtolabs.rundeck.app.support.ExtraCommand
 import com.dtolabs.rundeck.app.support.RunJobCommand
 import com.dtolabs.rundeck.core.authentication.Group
 import com.dtolabs.rundeck.core.authorization.AuthContext
+import com.dtolabs.rundeck.core.authorization.AuthorizationUtil
 import com.dtolabs.rundeck.core.authorization.UserAndRolesAuthContext
 import com.dtolabs.rundeck.core.common.Framework
 import com.dtolabs.rundeck.core.common.INodeEntry
+import com.dtolabs.rundeck.core.common.NodeSetImpl
+import com.dtolabs.rundeck.core.common.PluginControlService
 import com.dtolabs.rundeck.core.utils.NodeSet
 import com.dtolabs.rundeck.core.utils.OptsUtil
 import com.dtolabs.rundeck.plugins.logging.LogFilterPlugin
@@ -63,12 +66,16 @@ import rundeck.codecs.JobsXMLCodec
 import rundeck.codecs.JobsYAMLCodec
 import com.dtolabs.rundeck.app.api.ApiVersions
 import rundeck.services.*
+import rundeck.services.optionvalues.OptionValuesService
+import rundeck.utils.OptionsUtil
 
 import javax.servlet.http.HttpServletResponse
 import java.text.SimpleDateFormat
 import java.util.regex.Pattern
 
 class ScheduledExecutionController  extends ControllerBase{
+    static Logger logger = Logger.getLogger(ScheduledExecutionController)
+
     public static final String NOTIFY_ONSUCCESS_EMAIL = 'notifyOnsuccessEmail'
     public static final String NOTIFY_ONFAILURE_EMAIL = 'notifyOnfailureEmail'
     public static final String NOTIFY_ONSTART_EMAIL = 'notifyOnstartEmail'
@@ -79,9 +86,11 @@ class ScheduledExecutionController  extends ControllerBase{
     public static final String NOTIFY_FAILURE_RECIPIENTS = 'notifyFailureRecipients'
     public static final String NOTIFY_FAILURE_SUBJECT= 'notifyFailureSubject'
     public static final String NOTIFY_FAILURE_ATTACH= 'notifyFailureAttach'
+    public static final String NOTIFY_FAILURE_ATTACH_TYPE= 'notifyFailureAttachType'
     public static final String NOTIFY_SUCCESS_RECIPIENTS = 'notifySuccessRecipients'
     public static final String NOTIFY_SUCCESS_SUBJECT= 'notifySuccessSubject'
     public static final String NOTIFY_SUCCESS_ATTACH= 'notifySuccessAttach'
+    public static final String NOTIFY_SUCCESS_ATTACH_TYPE= 'notifySuccessAttachType'
     public static final String NOTIFY_FAILURE_URL = 'notifyFailureUrl'
     public static final String NOTIFY_ONFAILURE_URL = 'notifyOnfailureUrl'
     public static final String NOTIFY_ONSTART_URL = 'notifyOnstartUrl'
@@ -102,7 +111,8 @@ class ScheduledExecutionController  extends ControllerBase{
     public static final String NOTIFY_RETRYABLEFAILURE_URL = 'notifyRetryableFailureUrl'
     public static final String NOTIFY_RETRYABLEFAILURE_RECIPIENTS = 'notifyRetryableFailureRecipients'
     public static final String NOTIFY_RETRYABLEFAILURE_SUBJECT = 'notifyRetryableFailureSubject'
-    public static final String NOTIFY_RETRYABLEFAILURE_ATTACH= 'notifyFailureAttach'
+    public static final String NOTIFY_RETRYABLEFAILURE_ATTACH= 'notifyRetryableFailureAttach'
+    public static final String NOTIFY_RETRYABLEFAILURE_ATTACH_TYPE= 'notifyRetryableFailureType'
 
     public static final String EMAIL_NOTIFICATION_TYPE = 'email'
     public static final String WEBHOOK_NOTIFICATION_TYPE = 'url'
@@ -119,7 +129,6 @@ class ScheduledExecutionController  extends ControllerBase{
             NOTIFY_ONRETRYABLEFAILURE_URL
     ]
 
-    public final String REMOTE_OPTION_DISABLE_JSON_CHECK = 'project.jobs.disableRemoteOptionJsonCheck'
 
     def Scheduler quartzScheduler
     def ExecutionService executionService
@@ -132,6 +141,7 @@ class ScheduledExecutionController  extends ControllerBase{
     def ScmService scmService
     def PluginService pluginService
     def FileUploadService fileUploadService
+    OptionValuesService optionValuesService
 
 
     def index = { redirect(controller:'menu',action:'jobs',params:params) }
@@ -275,7 +285,7 @@ class ScheduledExecutionController  extends ControllerBase{
                                                                  [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_EXPORT])) {
                 if(scmService.projectHasConfiguredExportPlugin(params.project)) {
                     model.scmExportEnabled = true
-                    model.scmExportStatus = scmService.exportStatusForJobs([scheduledExecution])
+                    model.scmExportStatus = scmService.exportStatusForJobs(authContext, [scheduledExecution])
                     model.scmExportRenamedPath=scmService.getRenamedJobPathsForProject(params.project)?.get(scheduledExecution.extid)
                 }
             }
@@ -284,7 +294,7 @@ class ScheduledExecutionController  extends ControllerBase{
                                                                  [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_IMPORT])) {
                 if(scmService.projectHasConfiguredPlugin('import',params.project)) {
                     model.scmImportEnabled = true
-                    model.scmImportStatus = scmService.importStatusForJobs([scheduledExecution])
+                    model.scmImportStatus = scmService.importStatusForJobs(authContext, [scheduledExecution])
                 }
             }
             render(template: '/scheduledExecution/jobActionButtonMenuContent', model: model)
@@ -382,7 +392,7 @@ class ScheduledExecutionController  extends ControllerBase{
 
         if (model.nextExecution) {
 
-            final SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US)
+            final SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", Locale.US)
             format.setTimeZone(TimeZone.getTimeZone("GMT"));
             model.nextExecutionW3CTime = format.format(model.nextExecution)
         }
@@ -443,8 +453,8 @@ class ScheduledExecutionController  extends ControllerBase{
             Execution.countByScheduledExecution(scheduledExecution)
         }
         def reftotal = 0
-        if(scheduledExecution.refExecCount) {
-            reftotal = scheduledExecution.refExecCount
+        if(scheduledExecution.getRefExecCountStats()) {
+            reftotal = scheduledExecution.getRefExecCountStats()
         }
 
         def remoteClusterNodeUUID=null
@@ -492,7 +502,7 @@ class ScheduledExecutionController  extends ControllerBase{
                                                              [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_IMPORT])) {
             if(scmService.projectHasConfiguredPlugin('import',params.project)) {
                 dataMap.scmImportEnabled = true
-                dataMap.scmImportStatus = scmService.importStatusForJobs([scheduledExecution])
+                dataMap.scmImportStatus = scmService.importStatusForJobs(authContext, [scheduledExecution])
             }
         }
 
@@ -698,194 +708,39 @@ class ScheduledExecutionController  extends ControllerBase{
 
         //see if option specified, and has url
         if (scheduledExecution.options && scheduledExecution.options.find {it.name == params.option}) {
-            def Option opt = scheduledExecution.options.find {it.name == params.option}
-            def values=[]
+            Option opt = scheduledExecution.options.find {it.name == params.option}
             if (opt.realValuesUrl) {
-                //load expand variables in URL source
-
-                def realUrl = opt.realValuesUrl.toExternalForm()
-                String srcUrl = expandUrl(opt, realUrl, scheduledExecution, params.extra?.option,realUrl.matches(/(?i)^https?:.*$/))
-                String cleanUrl=srcUrl.replaceAll("^(https?://)([^:@/]+):[^@/]*@",'$1$2:****@');
-                def remoteResult=[:]
-                def result=null
-                def remoteStats=[startTime: System.currentTimeMillis(), httpStatusCode: "", httpStatusText: "", contentLength: "", url: srcUrl,durationTime:"",finishTime:"", lastModifiedDateTime:""]
-                def err = [:]
-                int timeout=10
-                int contimeout=0
-                int retryCount=5
-                if(grailsApplication.config.rundeck?.jobs?.options?.remoteUrlTimeout){
-                    try {
-                        timeout = Integer.parseInt(
-                                grailsApplication?.config?.rundeck?.jobs?.options?.remoteUrlTimeout?.toString()
-                        )
-                    }catch(NumberFormatException e) {
-                        log.warn(
-                                "Configuration value rundeck.jobs.options.remoteUrlTimeout is not a valid integer: "
-                                        + e.message
-                        )
-                    }
+                Map optionRemoteValues = scheduledExecutionService.loadOptionsRemoteValues(scheduledExecution, params, session.user)
+                def model = [optionSelect : optionRemoteValues.optionSelect,
+                             values       : optionRemoteValues.values,
+                             srcUrl       : optionRemoteValues.srcUrl,
+                             err          : optionRemoteValues.err,
+                             fieldPrefix  : params.fieldPrefix,
+                             selectedvalue: params.selectedvalue]
+                if (params.extra?.option?.get(opt.name)) {
+                    model.selectedoptsmap = [(opt.name): params.extra.option.get(opt.name)]
                 }
-                if(grailsApplication.config.rundeck?.jobs?.options?.remoteUrlConnectionTimeout){
-                    try {
-                        contimeout = Integer.parseInt(
-                                grailsApplication?.config?.rundeck?.jobs?.options?.remoteUrlConnectionTimeout?.toString()
-                        )
-                    }catch(NumberFormatException e) {
-                        log.warn(
-                                "Configuration value rundeck.jobs.options.remoteUrlConnectionTimeout is not a valid integer: "
-                                        + e.message
-                        )
-                    }
-                }
-                if(grailsApplication.config.rundeck?.jobs?.options?.remoteUrlRetry){
-                    try {
-                        retryCount = Integer.parseInt(
-                                grailsApplication?.config?.rundeck?.jobs?.options?.remoteUrlRetry?.toString()
-                        )
-                    }catch(NumberFormatException e) {
-                        log.warn(
-                                "Configuration value rundeck.jobs.options.remoteUrlRetry is not a valid integer: "
-                                        + e.message
-                        )
-                    }
-                }
-                if(srcUrl.indexOf('#')>=0 &&srcUrl.indexOf('#')<srcUrl.size()-1){
-                    def urlanchor=new HashMap<String,String>()
-                    def anchor=srcUrl.substring(srcUrl.indexOf('#')+1)
-                    def parts=anchor.split(";")
-                    parts.each{s->
-                        def subpart=s.split("=",2)
-                        if(subpart && subpart.length==2 && subpart[0] && subpart[1]){
-                            urlanchor[subpart[0]]=subpart[1]
-                        }
-                    }
-                    if(urlanchor['timeout']){
-                        try {
-                            timeout = Integer.parseInt(urlanchor['timeout'])
-                        }catch(NumberFormatException e) {
-                            log.warn(
-                                    "URL timeout ${urlanchor['timeout']} is not a valid integer: "
-                                            + e.message
-                            )
-                        }
-                    }
-                    if(urlanchor['contimeout']){
-                        try {
-                            contimeout = Integer.parseInt(urlanchor['contimeout'])
-                        }catch(NumberFormatException e) {
-                            log.warn(
-                                    "URL contimeout ${urlanchor['contimeout']} is not a valid integer: "
-                                            + e.message
-                            )
-                        }
-                    }
-                    if(urlanchor['retry']){
-                        try {
-                            retryCount = Integer.parseInt(urlanchor['retry'])
-                        }catch(NumberFormatException e) {
-                            log.warn(
-                                    "URL retry ${urlanchor['retry']} is not a valid integer: "
-                                            + e.message
-                            )
-                        }
-                    }
-                }
-                try {
-                    def framework = frameworkService.getRundeckFramework()
-                    def projectConfig = framework.projectManager.loadProjectConfig(scheduledExecution.project)
-                    boolean disableRemoteOptionJsonCheck= projectConfig.hasProperty(REMOTE_OPTION_DISABLE_JSON_CHECK)
-
-                    remoteResult = getRemoteJSON(srcUrl, timeout, contimeout, retryCount,disableRemoteOptionJsonCheck)
-                    result=remoteResult.json
-                    if(remoteResult.stats){
-                        remoteStats.putAll(remoteResult.stats)
-                    }
-                } catch (Exception e) {
-                    err.message = "Failed loading remote option values"
-                    err.exception = e
-                    err.srcUrl = cleanUrl
-                    log.error("getRemoteJSON error: URL ${cleanUrl} : ${e.message}");
-                    e.printStackTrace()
-                    remoteStats.finishTime=System.currentTimeMillis()
-                    remoteStats.durationTime= remoteStats.finishTime- remoteStats.startTime
-                }
-                if(remoteResult.error){
-                    err.message = "Failed loading remote option values"
-                    err.exception = new Exception(remoteResult.error)
-                    err.srcUrl = cleanUrl
-                    log.error("getRemoteJSON error: URL ${cleanUrl} : ${remoteResult.error}");
-                }
-                logRemoteOptionStats(remoteStats,[jobName:scheduledExecution.generateFullName(),id:scheduledExecution.extid, jobProject:scheduledExecution.project,optionName:params.option,user:session.user])
-                //validate result contents
-                boolean valid = true;
-                def validationerrors=[]
-                if(result){
-                    if( result instanceof Collection){
-                        result.eachWithIndex { entry,i->
-                            if(entry instanceof JSONObject){
-                                if(!entry.name){
-                                    validationerrors<<"Item: ${i} has no 'name' entry"
-                                    valid=false;
-                                }
-                                if(!entry.value){
-                                    validationerrors<<"Item: ${i} has no 'value' entry"
-                                    valid = false;
-                                }
-                            }else if(!(entry instanceof String)){
-                                valid = false;
-                                validationerrors << "Item: ${i} expected string or map like {name:\"..\",value:\"..\"}"
-                            }
-                        }
-                    } else if (result instanceof JSONObject) {
-                        JSONObject jobject = result
-                        result = []
-                        jobject.keys().sort().each {k ->
-                            result << [name: k, value: jobject.get(k)]
-                        }
-                    }else{
-                        validationerrors << "Expected top-level list with format: [{name:\"..\",value:\"..\"},..], or ['value','value2',..] or simple object with {name:\"value\",...}"
-                        valid=false
-                    }
-                    if(!valid){
-                        result=null
-                        err.message="Failed parsing remote option values: ${validationerrors.join('\n')}"
-                        err.code='invalid'
-                    }
-                }else if(!err){
-                    err.message = "Empty result"
-                    err.code='empty'
-                }
-                def model= [optionSelect: opt,
-                            values: result,
-                            srcUrl: cleanUrl,
-                            err: err,
-                            fieldPrefix: params.fieldPrefix,
-                            selectedvalue: params.selectedvalue]
-                if(params.extra?.option?.get(opt.name)){
-                    model.selectedoptsmap=[(opt.name):params.extra.option.get(opt.name)]
-                }
-                withFormat{
-                    html{
+                withFormat {
+                    html {
                         return render(template: "/framework/optionValuesSelect", model: model);
                     }
-                    json{
+                    json {
                         model.remove('optionSelect')
-                        model.name=opt.name
-                        if(model.err?.exception){
-                            model.err.exception=model.err.exception.toString()
+                        model.name = opt.name
+                        if (model.err?.exception) {
+                            model.err.exception = model.err.exception.toString()
                         }
                         render(contentType: 'application/json', text: model as JSON)
                     }
                 }
-
             } else {
 
-                withFormat{
-                    html{
+                withFormat {
+                    html {
                         return renderErrorFragment("not a url option: " + params.option)
                     }
-                    json{
-                        render(contentType: 'application/json', text: [err:[message:"not a url option: " + params.option]] as JSON)
+                    json {
+                        render(contentType: 'application/json', text: [err: [message: "not a url option: " + params.option]] as JSON)
                     }
                 }
             }
@@ -901,38 +756,6 @@ class ScheduledExecutionController  extends ControllerBase{
             }
         }
     }
-    static Logger optionsLogger = Logger.getLogger("com.dtolabs.rundeck.remoteservice.http.options")
-    private logRemoteOptionStats(stats,jobdata){
-        stats.keySet().each{k->
-            def v= stats[k]
-            if(v instanceof Date){
-                //TODO: reformat date
-                MDC.put(k,v.toString())
-                MDC.put("${k}Time",v.time.toString())
-            }else if(v instanceof String){
-                MDC.put(k,v?v:"-")
-            }else{
-                final string = v.toString()
-                MDC.put(k, string?string:"-")
-            }
-        }
-        jobdata.keySet().each{k->
-            final var = jobdata[k]
-            MDC.put(k,var?var:'-')
-        }
-        optionsLogger.info(stats.httpStatusCode + " " + stats.httpStatusText+" "+stats.contentLength+" "+stats.url)
-        stats.keySet().each {k ->
-            if (stats[k] instanceof Date) {
-                //reformat date
-                MDC.remove(k+'Time')
-            }
-            MDC.remove(k)
-        }
-        jobdata.keySet().each {k ->
-            MDC.remove(k)
-        }
-    }
-
     /**
      * Map of descriptive property name to ScheduledExecution domain class property names
      * used by expandUrl for embedded property references in remote options URL
@@ -951,77 +774,6 @@ class ScheduledExecutionController  extends ControllerBase{
         name:'name',
 
     ]
-    /**
-     * Expand the URL string's embedded property references of the form
-     * ${job.PROPERTY} and ${option.PROPERTY}.  available properties are
-     * limited
-     */
-    protected String expandUrl(Option opt, String url, ScheduledExecution scheduledExecution,selectedoptsmap=[:],boolean isHttp=true) {
-        def invalid = []
-        def rundeckProps=[
-                'nodename':frameworkService.getFrameworkNodeName(),
-                'serverUUID':frameworkService.serverUUID?:''
-        ]
-        if(!isHttp) {
-            rundeckProps.basedir= frameworkService.getRundeckBase()
-        }
-        def extraJobProps=[
-                'user.name': (session?.user?: "anonymous"),
-        ]
-        extraJobProps.putAll rundeckProps.collectEntries {['rundeck.'+it.key,it.value]}
-        Map globals=frameworkService.getProjectGlobals(scheduledExecution.project)
-
-        def replacement= { Object[] group ->
-            if (group[2] == 'job' && jobprops[group[3]] && scheduledExecution.properties.containsKey(jobprops[group[3]])) {
-                scheduledExecution.properties.get(jobprops[group[3]]).toString()
-            } else if (group[2] == 'job' && null != extraJobProps[group[3]]) {
-                def value = extraJobProps[group[3]]
-                value.toString()
-            }else if (group[2] == 'globals' && null != globals[group[3]]) {
-                def value = globals[group[3]]
-                value.toString()
-            }else if (group[2] == 'rundeck' && null != rundeckProps[group[3]]) {
-                def value = rundeckProps[group[3]]
-                value.toString()
-            } else if (group[2] == 'option' && optprops[group[3]] && opt.properties.containsKey(optprops[group[3]])) {
-                opt.properties.get(optprops[group[3]]).toString()
-            } else if (group[2] == 'option' && group[4] == '.value') {
-                def optname = group[3].substring(0, group[3].length() - '.value'.length())
-                def value = selectedoptsmap && selectedoptsmap instanceof Map ? selectedoptsmap[optname] : null
-                //find option with name
-                def Option expopt = scheduledExecution.options.find { it.name == optname }
-                if (value && expopt?.multivalued && (value instanceof Collection || value instanceof String[])) {
-                    value = value.join(expopt.delimiter)
-                }
-                (value ?: '')
-            } else {
-                null
-            }
-        }
-        //replace variables in the URL, using appropriate encoding before/after the URL parameter '?' separator
-        def arr=url.split(/\?/,2)
-        def codecs=['URIComponent','URL']
-        def result=[]
-        arr.eachWithIndex { String entry, int i ->
-            result<<entry.replaceAll(/(\$\{(job|option|rundeck|globals)\.([^}]+?(\.value)?)\})/) { Object[] group ->
-                def val = replacement(group)
-                 if (null != val) {
-                     if(!isHttp){
-                         return val
-                     }
-                     val."encodeAs${codecs[i]}"()
-                 } else {
-                     invalid << group[0]
-                     group[0]
-                 }
-             }
-        }
-        String srcUrl = result.join('?')
-        if (invalid) {
-            log.error("invalid expansion: " + invalid);
-        }
-        return srcUrl
-    }
 
     /**
      * Make a remote URL request and return the parsed JSON data and statistics for http requests in a map.
@@ -1043,8 +795,8 @@ class ScheduledExecutionController  extends ControllerBase{
      * @return Map of data, [json: parsed json or null, stats: stats data, error: error message]
      *
      */
-    private Object getRemoteJSON(String url, int timeout, int contimeout, int retry=5,boolean disableRemoteOptionJsonCheck=false){
-        log.debug("getRemoteJSON: "+url+", timeout: "+timeout+", retry: "+retry)
+    static Object getRemoteJSON(String url, int timeout, int contimeout, int retry=5,boolean disableRemoteOptionJsonCheck=false){
+        logger.debug("getRemoteJSON: "+url+", timeout: "+timeout+", retry: "+retry)
         //attempt to get the URL JSON data
         def stats=[:]
         if(url.startsWith("http:") || url.startsWith("https:")){
@@ -1372,7 +1124,7 @@ class ScheduledExecutionController  extends ControllerBase{
                 }
             }
         } else {
-            return apiService.renderErrorFormat(HttpServletResponse.SC_INTERNAL_SERVER_ERROR, response);
+            return apiService.renderErrorFormat(response, [status: result.status?:400, code: result.errorCode] + result);
         }
     }
 
@@ -1797,7 +1549,8 @@ class ScheduledExecutionController  extends ControllerBase{
         jobset*.uuid = params.id
         def changeinfo = [user: session.user, method: 'apiJobCreateSingle']
         String roleList = request.subject.getPrincipals(Group.class).collect { it.name }.join(",")
-        def loadresults = scheduledExecutionService.loadJobs(jobset, 'create', 'preserve', changeinfo, authContext)
+        def loadresults = scheduledExecutionService.loadJobs(jobset, 'create', 'preserve', changeinfo, authContext,
+                (params?.validateJobref=='true'))
         scheduledExecutionService.issueJobChangeEvents(loadresults.jobChangeEvents)
 
         def jobs = loadresults.jobs
@@ -1870,7 +1623,8 @@ class ScheduledExecutionController  extends ControllerBase{
         jobset*.uuid=params.id
         def changeinfo = [user: session.user, method: 'apiJobUpdateSingle']
         String roleList = request.subject.getPrincipals(Group.class).collect { it.name }.join(",")
-        def loadresults = scheduledExecutionService.loadJobs(jobset, 'update', 'preserve', changeinfo, authContext)
+        def loadresults = scheduledExecutionService.loadJobs(jobset, 'update', 'preserve', changeinfo, authContext,
+                (params?.validateJobref=='true'))
         scheduledExecutionService.issueJobChangeEvents(loadresults.jobChangeEvents)
 
         def jobs = loadresults.jobs
@@ -2026,19 +1780,28 @@ class ScheduledExecutionController  extends ControllerBase{
             session.removeAttribute('undoOPTS');
             session.removeAttribute('redoOPTS');
         }
-        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()
-        def stepTypes = frameworkService.getStepPluginDescriptions()
+        def pluginControlService=frameworkService.getPluginControlService(params.project)
+        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name,'WorkflowNodeStep')
+        }
+        def stepTypes = frameworkService.getStepPluginDescriptions()?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name,'WorkflowStep')
+        }
         def strategyPlugins = scheduledExecutionService.getWorkflowStrategyPluginDescriptions()
         
         def crontab = scheduledExecution.timeAndDateAsBooleanMap()
 
-        def notificationPlugins = notificationService.listNotificationPlugins()
+        def notificationPlugins = notificationService.listNotificationPlugins().findAll{k,v->
+            !pluginControlService?.isDisabledPlugin(k,'Notification')
+        }
 
         def orchestratorPlugins = orchestratorPluginService.listDescriptions()
         def globals=frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
 
         def timeZones = scheduledExecutionService.getTimeZones()
-        def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin)
+        def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin).findAll{k,v->
+            !pluginControlService?.isDisabledPlugin(k,'LogFilter')
+        }
         def fprojects = frameworkService.projectNames(authContext)
         return [scheduledExecution  :scheduledExecution, crontab:crontab, params:params,
                 notificationPlugins : notificationPlugins,
@@ -2100,18 +1863,29 @@ class ScheduledExecutionController  extends ControllerBase{
                     params[it]='false'
                 }
             }
-            def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()
-            def stepTypes = frameworkService.getStepPluginDescriptions()
+            def pluginControlService = frameworkService.getPluginControlService(params.project)
+            def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()?.findAll{
+                !pluginControlService?.isDisabledPlugin(it.name, 'WorkflowNodeStep')
+            }
+            def stepTypes = frameworkService.getStepPluginDescriptions()?.findAll{
+                !pluginControlService?.isDisabledPlugin(it.name, 'WorkflowStep')
+            }
             def strategyPlugins = scheduledExecutionService.getWorkflowStrategyPluginDescriptions()
-            def globals=frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
-            def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin)
+            def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin).findAll{k,v->
+                !pluginControlService?.isDisabledPlugin(k, 'LogFilter')
+            }
+            def notificationPlugins = notificationService.listNotificationPlugins().findAll{k,v->
+                !pluginControlService?.isDisabledPlugin(k, 'Notification')
+            }
+
+            def globals = frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
             return render(view:'edit', model: [scheduledExecution:scheduledExecution,
                        nextExecutionTime:scheduledExecutionService.nextExecutionTime(scheduledExecution),
                     notificationValidation: params['notificationValidation'],
                     nodeStepDescriptions: nodeStepTypes,
                     stepDescriptions: stepTypes,
                     strategyPlugins: strategyPlugins,
-                    notificationPlugins: notificationService.listNotificationPlugins(),
+                    notificationPlugins: notificationPlugins,
                     orchestratorPlugins: orchestratorPluginService.listDescriptions(),
                     params:params,
                     globalVars:globals,
@@ -2155,15 +1929,11 @@ class ScheduledExecutionController  extends ControllerBase{
                 [AuthConstants.ACTION_READ], scheduledExecution.project), AuthConstants.ACTION_READ, 'Job', params.id)) {
             return
         }
-
-        def newScheduledExecution = new ScheduledExecution()
-
-        def origprops = [:]+scheduledExecution.properties
-        ScheduledExecution.transients.each{origprops.remove(it)}
-        newScheduledExecution.properties = origprops
+        def newScheduledExecution = ScheduledExecution.fromMap(scheduledExecution.toMap())
         if (newScheduledExecution.hasErrors()) {
             newScheduledExecution.errors.allErrors.each{log.warn("job copy data binding: "+it)}
         }
+        newScheduledExecution.project=scheduledExecution.project
         newScheduledExecution.id=null
         newScheduledExecution.uuid=null
         newScheduledExecution.nextExecution=null
@@ -2181,13 +1951,34 @@ class ScheduledExecutionController  extends ControllerBase{
         if(newScheduledExecution.scheduled){
             crontab=newScheduledExecution.timeAndDateAsBooleanMap()
         }
-        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()
-        def stepTypes = frameworkService.getStepPluginDescriptions()
 
+        def nodeSteps = frameworkService.getNodeStepPluginDescriptions()
+        def workflowSteps = frameworkService.getStepPluginDescriptions()
         def strategyPlugins = scheduledExecutionService.getWorkflowStrategyPluginDescriptions()
-        def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin)
-        def globals = frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
+        def logFilterPluginDescs = pluginService.listPlugins(LogFilterPlugin)
+        def notificationPluginDescs = notificationService.listNotificationPlugins()
+
+        def pluginControlService = frameworkService.getPluginControlService(params.project)
+
+        def nodeStepTypes = nodeSteps?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name, 'WorkflowNodeStep')
+        }
+
+        def stepTypes = workflowSteps?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name,'WorkflowStep')
+        }
+
+        def logFilterPlugins = logFilterPluginDescs.findAll{ k, v->
+            !pluginControlService?.isDisabledPlugin(k,'LogFilter')
+        }
+
+        def notificationPlugins = notificationPluginDescs.findAll{ k, v->
+            !pluginControlService?.isDisabledPlugin(k,'Notification')
+        }
+
         def fprojects = frameworkService.projectNames(authContext)
+        def globals = frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
+
         render(
                 view: 'create',
                 model: [
@@ -2199,7 +1990,7 @@ class ScheduledExecutionController  extends ControllerBase{
                         nodeStepDescriptions: nodeStepTypes,
                         stepDescriptions    : stepTypes,
                         strategyPlugins     : strategyPlugins,
-                        notificationPlugins : notificationService.listNotificationPlugins(),
+                        notificationPlugins : notificationPlugins,
                         orchestratorPlugins : orchestratorPluginService.listDescriptions(),
                         logFilterPlugins    : logFilterPlugins,
                         projectNames        : fprojects,
@@ -2333,19 +2124,30 @@ class ScheduledExecutionController  extends ControllerBase{
             session.removeAttribute('undoOPTS');
             session.removeAttribute('redoOPTS');
         }
+        def pluginControlService = frameworkService.getPluginControlService(params.project)
 
-        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()
-        def stepTypes = frameworkService.getStepPluginDescriptions()
-        log.debug("ScheduledExecutionController: create : now returning model data to view...")
+        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name, 'WorkflowNodeStep')
+        }
+        def stepTypes = frameworkService.getStepPluginDescriptions()?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name, 'WorkflowStep')
+        }
+        def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin).findAll { k, v ->
+            !pluginControlService?.isDisabledPlugin(k, 'LogFilter')
+        }
+        def notificationPlugins = notificationService.listNotificationPlugins().findAll { k, v ->
+            !pluginControlService?.isDisabledPlugin(k, 'Notification')
+        }
+
         def strategyPlugins = scheduledExecutionService.getWorkflowStrategyPluginDescriptions()
-        def globals=frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
 
+        def globals=frameworkService.getProjectGlobals(scheduledExecution.project).keySet()
         def timeZones = scheduledExecutionService.getTimeZones()
-        def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin)
         def fprojects = frameworkService.projectNames(authContext)
+
         return ['scheduledExecution':scheduledExecution, params:params, crontab:[:],
                 nodeStepDescriptions: nodeStepTypes, stepDescriptions: stepTypes,
-                notificationPlugins : notificationService.listNotificationPlugins(),
+                notificationPlugins : notificationPlugins,
                 strategyPlugins     :strategyPlugins,
                 orchestratorPlugins : orchestratorPluginService.listDescriptions(),
                 logFilterPlugins    : logFilterPlugins,
@@ -2448,6 +2250,7 @@ class ScheduledExecutionController  extends ControllerBase{
         params.nodeKeepgoing= runAdhocRequest.nodeKeepgoing!=null?runAdhocRequest.nodeKeepgoing:true
         params.nodeThreadcount= runAdhocRequest.nodeThreadcount?:1
         params.description = runAdhocRequest.description ?: ""
+        params.excludeFilterUncheck = false
         if (params.filterName) {
             def User u = userService.findOrCreateUser(authContext.username)
             //load a named filter and create a query from it
@@ -2546,16 +2349,26 @@ class ScheduledExecutionController  extends ControllerBase{
                 request.message=g.message(code:'ScheduledExecutionController.save.failed')
             }
         }
-
-        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()
-        def stepTypes = frameworkService.getStepPluginDescriptions()
+        def pluginControlService = frameworkService.getPluginControlService(params.project)
+        def nodeStepTypes = frameworkService.getNodeStepPluginDescriptions()?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name,'WorkflowNodeStep')
+        }
+        def stepTypes = frameworkService.getStepPluginDescriptions()?.findAll{
+            !pluginControlService?.isDisabledPlugin(it.name,'WorkflowStep')
+        }
         def strategyPlugins = scheduledExecutionService.getWorkflowStrategyPluginDescriptions()
 
-            def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin)
+        def logFilterPlugins = pluginService.listPlugins(LogFilterPlugin).findAll{k,v->
+            !pluginControlService?.isDisabledPlugin(k,'LogFilter')
+        }
+        def notificationPlugins = notificationService.listNotificationPlugins().findAll{k,v->
+            !pluginControlService?.isDisabledPlugin(k,'Notification')
+        }
+
         render(view: 'create', model: [scheduledExecution: scheduledExecution, params: params,
                                        nodeStepDescriptions: nodeStepTypes,
                 stepDescriptions: stepTypes,
-                notificationPlugins: notificationService.listNotificationPlugins(),
+                notificationPlugins: notificationPlugins,
                 strategyPlugins:strategyPlugins,
                 orchestratorPlugins: orchestratorPluginService.listDescriptions(),
                 notificationValidation:params['notificationValidation'],
@@ -2614,7 +2427,7 @@ class ScheduledExecutionController  extends ControllerBase{
         def changeinfo = [user: session.user,method:'upload']
         String roleList = request.subject.getPrincipals(Group.class).collect {it.name}.join(",")
         def loadresults = scheduledExecutionService.loadJobs(jobset, params.dupeOption, params.uuidOption,
-                 changeinfo,authContext)
+                 changeinfo,authContext, (params?.validateJobref=='true'))
             scheduledExecutionService.issueJobChangeEvents(loadresults.jobChangeEvents)
 
 
@@ -2655,12 +2468,14 @@ class ScheduledExecutionController  extends ControllerBase{
         //test nodeset to make sure there are matches
         if(scheduledExecution.doNodedispatch){
             NodeSet nset = ExecutionService.filtersAsNodeSet(scheduledExecution)
+            NodeSet unselectedNset = ExecutionService.filtersExcludeAsNodeSet(scheduledExecution)
             model.nodefilter=scheduledExecution.asFilter()
             //check nodeset filters for variable expansion
             def varfound = scheduledExecution.asFilter().contains("\${")
             if (varfound) {
                 model.nodesetvariables = true
             }
+            def failedNodes = null
             if (params.retryFailedExecId) {
                 Execution e = Execution.get(params.retryFailedExecId)
                 if (e && e.scheduledExecution?.id == scheduledExecution.id) {
@@ -2669,6 +2484,13 @@ class ScheduledExecutionController  extends ControllerBase{
                         nset = ExecutionService.filtersAsNodeSet([filter: OptsUtil.join("name:", e.failedNodeList)])
                     }
                     model.nodesetvariables = false
+
+                    def failedSet = ExecutionService.filtersAsNodeSet([filter: OptsUtil.join("name:", e.failedNodeList)])
+                    failedNodes = frameworkService.filterAuthorizedNodes(
+                            scheduledExecution.project,
+                            new HashSet<String>(["read", "run"]),
+                            frameworkService.filterNodeSet(failedSet, scheduledExecution.project),
+                            authContext).nodes;
                 }
             }
             def nodes = frameworkService.filterAuthorizedNodes(
@@ -2676,6 +2498,33 @@ class ScheduledExecutionController  extends ControllerBase{
                     new HashSet<String>(["read", "run"]),
                     frameworkService.filterNodeSet(nset, scheduledExecution.project),
                     authContext).nodes;
+
+            def unselectedNodes
+
+            if(unselectedNset && !(unselectedNset.include?.blank && unselectedNset.exclude?.blank)){
+                def unselectedNodesFilter = frameworkService.filterAuthorizedNodes(
+                                                    scheduledExecution.project,
+                                                    new HashSet<String>(["read", "run"]),
+                                                    frameworkService.filterNodeSet(unselectedNset, scheduledExecution.project),
+                                                    authContext)
+
+                if(unselectedNodesFilter){
+                    unselectedNodes = unselectedNodesFilter.nodes
+                }
+            }
+
+            if(failedNodes && failedNodes.size()>0){
+                //if failed nodes are not part of original node filter, it will be added
+                def failedNodeNotInNodes = failedNodes.findAll{ !nodes.contains( it ) }
+                if(failedNodeNotInNodes && failedNodeNotInNodes.size()>0){
+                    def nodeImp = new NodeSetImpl()
+                    if(nodes){
+                        nodeImp.putNodes(nodes)
+                    }
+                    nodeImp.putNodes(failedNodeNotInNodes)
+                    nodes=nodeImp.getNodes()
+                }
+            }
 
             if(!nodes || nodes.size()<1){
                 //error
@@ -2688,7 +2537,7 @@ class ScheduledExecutionController  extends ControllerBase{
                 model.grouptags=[:]
                 model.nodesSelectedByDefault=scheduledExecution.hasNodesSelectedByDefault()
                 if (!model.nodesSelectedByDefault) {
-                    model.selectedNodes = ""
+                    model.selectedNodes = []
                 }
                 //summarize node groups
                 def namegroups=[other: new TreeList()]
@@ -2760,6 +2609,9 @@ class ScheduledExecutionController  extends ControllerBase{
             }else{
                 model.nodes = nodes
             }
+            if(unselectedNodes){
+                model.unselectedNodes = unselectedNodes
+            }
 
         }
 
@@ -2778,11 +2630,16 @@ class ScheduledExecutionController  extends ControllerBase{
                             ),
                             authContext).nodes;
 
-                    model.selectedNodes = retryNodes*.nodename.join(',')
+                    model.selectedNodes = retryNodes*.nodename
                 }
             }
         }else if(params.argString){
             model.selectedoptsmap = FrameworkService.parseOptsFromString(params.argString)
+        }
+        if(model.unselectedNodes && !params.retryExecId){
+            def selectedNodes = model.nodes.findAll{ ! model.unselectedNodes.contains(it)  }
+            model.selectedNodes = selectedNodes*.nodename
+            model.unselectedNodes = model.unselectedNodes*.nodename
         }
         model.localNodeName=framework.getFrameworkNodeName()
 
@@ -2816,6 +2673,9 @@ class ScheduledExecutionController  extends ControllerBase{
                         optdeps[opt.name] << oname
                     }
                 }
+            }
+            if(opt.optionValuesPluginType) {
+                opt.valuesFromPlugin = optionValuesService.getOptions(scheduledExecution.project,opt.optionValuesPluginType)
             }
         }
         model.dependentoptions=depopts
@@ -2913,7 +2773,12 @@ class ScheduledExecutionController  extends ControllerBase{
 
         def link
         if(params.followdetail){
-            link =createLink(controller: "execution",action: "follow",id: results.id, fragment: params.followdetail)
+            if(params.followdetail=='html'){
+                link =createLink(controller: "execution", action: "renderOutput", id: results.id,
+                        params:[convertContent:'on', loglevels:'on', ansicolor:'on', project:params.project, reload:'true'])
+            }else{
+                link =createLink(controller: "execution",action: "follow",id: results.id, fragment: params.followdetail)
+            }
         } else {
             link = createLink(controller: "execution", action: "follow", id: results.id)
         }
@@ -2956,7 +2821,11 @@ class ScheduledExecutionController  extends ControllerBase{
         }
         def link
         if(params.followdetail){
-            link =createLink(controller: "execution",action: "follow",id: results.id, fragment: params.followdetail)
+            if(params.followdetail=='html'){
+                link =createLink(controller: "execution", action: "renderOutput", id: results.id, params:[convertContent:'on', loglevels:'on', ansicolor:'on', project:params.project, reload:'true'])
+            }else{
+                link =createLink(controller: "execution",action: "follow",id: results.id, fragment: params.followdetail)
+            }
         }else {
             link = createLink(controller: "execution", action: "follow", id: results.id)
         }
@@ -3013,7 +2882,11 @@ class ScheduledExecutionController  extends ControllerBase{
             }
             return renderErrorView(results)
         } else if (params.follow == 'true') {
-            redirect(controller: "execution", action: "follow", id: results.id, params:[outdetails: params.followdetail])
+            if(params.followdetail=='html'){
+                redirect(controller: "execution", action: "renderOutput", id: results.id, params:[convertContent:'on', loglevels:'on', ansicolor:'on', project:params.project, reload:'true'])
+            }else{
+                redirect(controller: "execution", action: "follow", id: results.id, params:[outdetails: params.followdetail])
+            }
         } else {
             redirect(controller: "scheduledExecution", action: "show", id: params.id)
         }
@@ -3420,7 +3293,8 @@ class ScheduledExecutionController  extends ControllerBase{
         if (request.api_version < ApiVersions.V9) {
             option = null
         }
-        def loadresults = scheduledExecutionService.loadJobs(jobset,params.dupeOption, option, changeinfo, authContext)
+        def loadresults = scheduledExecutionService.loadJobs(jobset,params.dupeOption, option, changeinfo, authContext,
+                (params?.validateJobref=='true'))
         scheduledExecutionService.issueJobChangeEvents(loadresults.jobChangeEvents)
 
         def jobs = loadresults.jobs
@@ -4333,6 +4207,23 @@ class ScheduledExecutionController  extends ControllerBase{
                     ]
             )
         }
+        if (!frameworkService.authorizeProjectResourceAll(
+                authContext,
+                AuthConstants.RESOURCE_TYPE_EVENT,
+                [AuthConstants.ACTION_READ],
+                scheduledExecution.project
+        )
+        ) {
+
+            return apiService.renderErrorFormat(
+                    response,
+                    [
+                            status: HttpServletResponse.SC_FORBIDDEN,
+                            code: 'api.error.item.unauthorized',
+                            args: ['Read', 'Events in Project', scheduledExecution.project]
+                    ]
+            )
+        }
 
         if (apiRequest && request.api_version < ApiVersions.V14 && !(response.format in ['all', 'xml'])) {
             return apiService.renderErrorFormat(response,[
@@ -4412,6 +4303,7 @@ class ScheduledExecutionController  extends ControllerBase{
         String serverUUID=null
         boolean serverAll=false
         String project=null
+        def jobIds=[]
         def jobid=null
         if(request.format=='json' ){
             def data= request.JSON
@@ -4419,6 +4311,14 @@ class ScheduledExecutionController  extends ControllerBase{
             serverAll = data?.server?.all?true:false
             project = data?.project?:null
             jobid = data?.job?.id?:null
+            if(jobid){
+                jobIds << jobid
+            }
+            if(request.api_version >= ApiVersions.V32 && data?.jobs){
+                data?.jobs.each{job->
+                    jobIds << job.id
+                }
+            }
         }else if(request.format=='xml' || !request.format){
             def data= request.XML
             if(data.name()=='server'){
@@ -4428,19 +4328,31 @@ class ScheduledExecutionController  extends ControllerBase{
                 serverUUID = data.server?.'@uuid'?.text()?:null
                 serverAll = data.server?.'@all'?.text()=='true'
                 project = data.project?.'@name'?.text()?:null
-                jobid = data.job?.'@id'?.text()?:null
+                if(request.api_version >= ApiVersions.V32){
+                    if(data.job?.size()>0){
+                        data.job?.each{ job ->
+                            jobIds << job?.'@id'?.text()
+
+                        }
+                    }
+                }else{
+                    jobid = data.job?.'@id'?.text()?:null
+                    if(jobid){
+                        jobIds << jobid
+                    }
+                }
             }
         }else{
             return apiService.renderErrorFormat(response, [status: HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE,
                     code: 'api.error.invalid.request',
                     args: ['Expected content of type text/xml or text/json, content was of type: ' + request.format]])
         }
-        if (!serverUUID && !serverAll&& !jobid) {
+        if (!serverUUID && !serverAll && !jobIds) {
             return apiService.renderErrorFormat(response, [status: HttpServletResponse.SC_BAD_REQUEST,
                     code: 'api.error.invalid.request', args: ['Expected server.uuid or server.all or job.id in request.']])
         }
 
-        def reclaimMap=scheduledExecutionService.reclaimAndScheduleJobs(serverUUID,serverAll,project,jobid)
+        def reclaimMap=scheduledExecutionService.reclaimAndScheduleJobs(serverUUID,serverAll,project,jobIds?:null)
         def successCount=reclaimMap.findAll {it.value.success}.size()
         def failedCount = reclaimMap.size() - successCount
         //TODO: retry for failed reclaims?
@@ -4486,6 +4398,11 @@ class ScheduledExecutionController  extends ControllerBase{
                         }
                         if(jobid){
                             delegate.'job'(id:jobid)
+                        }
+                        if(jobIds){
+                            jobIds.each { jid ->
+                                delegate.'job'(id:jid)
+                            }
                         }
                         delegate.'jobs'(total: reclaimMap.size()){
                             delegate.'successful'(count: successCount) {

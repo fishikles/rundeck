@@ -151,4 +151,84 @@ class RulesSpec extends Specification {
         cond.test(States.state(a: 'b', c: 'd'))
         cond.test(States.state(a: 'b', c: 'd', e: 'f'))
     }
+
+    def "less than condition key value"() {
+        given:
+        def cond = Rules.ltCondition("a", "1")
+
+        expect:
+        cond.test(States.state("a", "0"))
+        cond.test(States.state("a", "0.5"))
+        !cond.test(States.state("a", "1"))
+        !cond.test(States.state("a", "2"))
+        cond.test(States.state("a", "test"))
+        cond.test(States.state("c", "2"))
+        !cond.test(States.state("a", "1-test"))
+
+    }
+
+    def "greater than condition key value"() {
+        given:
+        def cond = Rules.gtCondition("a", "1")
+
+        expect:
+        !cond.test(States.state("a", "0"))
+        cond.test(States.state("a", "1.5"))
+        !cond.test(States.state("a", "1"))
+        cond.test(States.state("a", "2"))
+        cond.test(States.state("a", "2 test"))
+        !cond.test(States.state("a", "test"))
+        !cond.test(States.state("c", "2"))
+
+    }
+
+    def "numeric equals condition key value"() {
+        given:
+        def cond = Rules.eqCondition("a", "1")
+
+        expect:
+        !cond.test(States.state("a", "0"))
+        cond.test(States.state("a", "1"))
+        cond.test(States.state("a", "0.9999999"))
+        cond.test(States.state("a", "1-test"))
+        cond.test(States.state("a", "1 test"))
+        !cond.test(States.state("a", "test-1"))
+        !cond.test(States.state("a", "2"))
+        !cond.test(States.state("a", "2-test"))
+
+
+    }
+
+    def "numeric equals condition key value using state"() {
+        given:
+        def cond = Rules.eqCondition("a", "b")
+
+        expect:
+        cond.test(States.state(a: '1', b: '1'))
+        cond.test(States.state("a", "b"))
+        !cond.test(States.state("a", "1"))
+        !cond.test(States.state(a: '0', b: '1'))
+    }
+
+    def "less than condition key value using state"() {
+        given:
+        def cond = Rules.ltCondition("a", "b")
+
+        expect:
+        cond.test(States.state(a: '1', b: '2'))
+        !cond.test(States.state(a: '1', b: '1'))
+        !cond.test(States.state(a: '2', b: '1'))
+
+    }
+
+    def "greater than condition key value using state "() {
+        given:
+        def cond = Rules.gtCondition("a", "b")
+
+        expect:
+        !cond.test(States.state(a: '1', b: '2'))
+        !cond.test(States.state(a: '1', b: '1'))
+        cond.test(States.state(a: '2', b: '1'))
+
+    }
 }

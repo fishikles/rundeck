@@ -28,11 +28,15 @@
         class="form-horizontal"
         onsubmit="if(typeof(validateJobEditForm)=='function'){return validateJobEditForm(this);}">
 
-<div class="card obs_delete_hide" id="editForm">
-    <div class="card-header">
+<div class="card " id="editForm">
+    <div class="card-header" data-ko-bind="jobeditor">
         <div class="row">
             <h4 class="col-sm-10 card-title">
-              <g:message code="ScheduledExecution.page.edit.title" />
+                <span class="text-secondary colon-after"><g:message code="ScheduledExecution.page.edit.title" /></span>
+                <a href="#" data-bind="text: jobName, attr: {href: href, title: groupPath}, bootstrapTooltip: groupPath">
+
+                </a>
+                <span class=" text-muted" data-bind="text: uuid"></span>
             </h4>
 
             <auth:resourceAllowed action="${AuthConstants.ACTION_CREATE}"
@@ -51,34 +55,21 @@
     </div>
 
     <div class="card-content">
-        <g:render template="edit" model="[scheduledExecution:scheduledExecution, crontab:crontab, command:command,authorized:authorized]"/>
+        <tmpl:tabsEdit scheduledExecution="${scheduledExecution}" crontab="${crontab}" authorized="${authorized}"
+                       command="${command}"/>
     </div>
 
-    <div class="card-footer">
+    <div class="card-footer" data-ko-bind="jobeditor">
       <g:actionSubmit id="editFormCancelButton" value="${g.message(code: 'cancel')}"
                       onclick="if(typeof(jobEditCancelled)=='function'){jobEditCancelled();}"
-                      class="btn btn-default reset_page_confirm"/>
+                      class="btn btn-default reset_page_confirm"
+                      action="Cancel"/>
       <g:actionSubmit value="${g.message(code: 'button.action.Save')}" action="Update" class="btn btn-primary reset_page_confirm "/>
+        <span data-bind="if: errorTabs().length" class="text-warning">
+            <g:message code="job.editor.workflow.unsavedchanges.warning" />
+        </span>
     </div>
 
 </div>
 
 </g:form>
-<g:javascript>
-fireWhenReady('editForm',function(){
-    $$('.behavior_delete_show').each(function(e){
-        Event.observe(e,'click',function(evt){
-            evt.stop();
-            $$('.obs_delete_hide').each(Element.hide);
-            $$('.obs_delete_show').each(Element.show);
-        })
-    });
-    $$('.behavior_delete_hide').each(function(e){
-        Event.observe(e,'click',function(evt){
-            evt.stop();
-            $$('.obs_delete_hide').each(Element.show);
-            $$('.obs_delete_show').each(Element.hide);
-        })
-    });
-});
-</g:javascript>

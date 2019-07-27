@@ -952,4 +952,70 @@ class ScheduledExecutionTest  {
             assertEquals "dayOfWeek.MON was not true", "true", map['dayOfWeek.SAT']
         }
     }
+
+    void testFromMapNodeHealthCheckNullEditable() {
+        ScheduledExecution se = ScheduledExecution.fromMap(
+                [
+                        jobName: 'abc'
+                ]
+        )
+        assertNotNull(se)
+        assertNotNull(se.excludeFilterUncheck)
+        assertEquals(false, se.excludeFilterUncheck)
+    }
+
+    void testFromMapNodeHealthCheckEditable() {
+        ScheduledExecution se = ScheduledExecution.fromMap(
+                [
+                        jobName: 'abc',
+                        excludeFilterUncheck: true
+                ]
+        )
+        assertNotNull(se)
+        assertNotNull(se.excludeFilterUncheck)
+        assertEquals(true, se.excludeFilterUncheck)
+    }
+
+    void testToMapNodeHealthCheckDefault_false() {
+        ScheduledExecution se = createBasicScheduledExecution()
+        se.doNodedispatch=true
+        def jobMap = se.toMap()
+        assertNotNull(jobMap)
+        assertEquals(null,jobMap.excludeFilterUncheck)
+    }
+
+    void testToMapNodeHealthCheck_true() {
+        ScheduledExecution se = createBasicScheduledExecution()
+        se.doNodedispatch=true
+        se.filterExclude="tags: unhealthy"
+        se.excludeFilterUncheck=true
+        def jobMap = se.toMap()
+        assertNotNull(jobMap)
+        assertEquals(true,jobMap.excludeFilterUncheck)
+    }
+
+    void testDeleteScheduleExecutionWorkflowCascadeAll() {
+
+        WorkflowStep workflowStep = new CommandExec([adhocRemoteString: 'test1 buddy', argString: '-delay 12 -monkey cheese -particle'])
+
+        ScheduledExecution se1 = new ScheduledExecution(
+                uuid: 'test1',
+                jobName: 'red color',
+                project: 'Test',
+                groupPath: 'some',
+                description: 'a job',
+                argString: '-a b -c d',
+                workflow: new Workflow(keepgoing: true, commands: [workflowStep]).save(),
+        )
+
+        assert null != se1.save(flush: true)
+
+        assertNotNull ScheduledExecution.findById(se1.id)
+        assertNotNull Workflow.findById(se1.workflowId)
+
+        se1.delete(flush: true)
+
+        assertNull ScheduledExecution.findById(se1.id)
+        assertFalse Workflow.findAll().any {Workflow w -> w.id == se1.workflowId}
+    }
 }

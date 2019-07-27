@@ -30,7 +30,7 @@
     <link rel="shortcut icon" href="${g.resource(dir: 'images', file: 'favicon.ico')}"/>
     <link rel="apple-touch-icon-precomposed" href="${g.resource(dir: 'images', file: 'favicon-152.png')}"/>
     <asset:stylesheet href="bootstrap.min.css"/>
-    <asset:stylesheet href="app.scss.css"/>
+    <asset:stylesheet href="app.css"/>
     <!--[if lt IE 9]>
     <asset:javascript src="respond.min.js"/>
     <![endif]-->
@@ -45,34 +45,31 @@
       <div class="content">
         <div class="container">
           <div class="row">
+            <g:set var="userDefinedInstanceName" value="${grailsApplication.config.rundeck?.gui?.instanceName}"/>
+            <g:if test="${userDefinedInstanceName}">
+              <div class="col-md-12" style="text-align:center;margin-bottom:3em;">
+                  <span class="label label-white" style="padding:.8em;font-size: 20px; border-radius:3px;    box-shadow: 0 6px 10px -4px rgba(0, 0, 0, 0.15);">
+                      ${enc(sanitize:userDefinedInstanceName)}
+                  </span>
+              </div>
+            </g:if>
             <div class="col-md-4 col-sm-6 col-md-offset-4 col-sm-offset-3">
               <div class="card">
                 <div class="card-header">
                   <h4 class="card-title">
                     <div class="logo">
-                        <a href="${grailsApplication.config.rundeck.gui.titleLink ? enc(attr:grailsApplication.config.rundeck.gui.titleLink) : g.createLink(uri: '/')}"
-                           title="Home">
-                            <g:set var="appTitle"
-                                   value="${grailsApplication.config.rundeck?.gui?.title ?: g.message(code: 'main.app.name',default:'')}"/>
-                            <g:set var="appDefaultTitle" value="${g.message(code: 'main.app.default.name',default:'')}"/>
-                            <g:set var="brandHtml"
-                                   value="${grailsApplication.config.rundeck?.gui?.brand?.html ?: g.message(code: 'main.app.brand.html',default:'')}"/>
-                            <g:set var="brandDefaultHtml"
-                                   value="${g.message(code: 'main.app.brand.default.html',default:'')}"/>
-                            <i class="rdicon app-logo"></i>
-                            <g:if test="${brandHtml}">
-                                ${enc(sanitize:brandHtml)}
-                            </g:if>
-                            <g:elseif test="${appTitle}">
-                                ${appTitle}
-                            </g:elseif>
-                            <g:elseif test="${brandDefaultHtml}">
-                                ${enc(sanitize:brandDefaultHtml)}
-                            </g:elseif>
-                            <g:else>
-                                ${appDefaultTitle}
-                            </g:else>
+                        <a href="${grailsApplication.config.rundeck.gui.titleLink ? enc(attr:grailsApplication.config.rundeck.gui.titleLink) : g.createLink(uri: '/')}" title="Home">
+                          <img src="${resource(dir: 'images', file: 'rundeck-full-logo-black.png')}" alt="Rundeck" style="height: 20px; width: auto;"/>
                         </a>
+
+                        <g:set var="userDefinedLogo" value="${grailsApplication.config.rundeck?.gui?.logo}"/>
+                        <g:if test="${userDefinedLogo}">
+                          <g:set var="safeUserLogo" value="${userDefinedLogo.toString().encodeAsSanitizedHTML()}" />
+                          <g:set var="userAssetBase" value="/user-assets" />
+                          <div style="margin-top:2em">
+                            <img src="${g.createLink(uri:userAssetBase+"/"+safeUserLogo)}">
+                          </div>
+                        </g:if>
                     </div>
                     <p class="text-center h4">
                       <g:message code="you.are.now.logged.out"/>

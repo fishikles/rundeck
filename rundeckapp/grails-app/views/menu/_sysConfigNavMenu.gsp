@@ -24,6 +24,41 @@
         context: 'application'
 )}"/>
 
+<g:set var="authAdmin" value="${auth.resourceAllowedTest(
+            kind: 'user',
+            action: [AuthConstants.ACTION_ADMIN],
+            context: 'application'
+    )}"/>
+
+<g:set var="pluginRead" value="${auth.resourceAllowedTest(
+        type: 'resource',
+        kind: 'plugin',
+        action: [AuthConstants.ACTION_READ, AuthConstants.ACTION_ADMIN],
+        any: true,
+        context: 'application'
+)}"/>
+<g:set var="pluginInstall" value="${auth.resourceAllowedTest(
+        type: 'resource',
+        kind: 'plugin',
+        action: ["install","admin"],
+        any: true,
+        context: 'application'
+)}"/>
+<g:set var="repoEnabled" value="${grailsApplication.config.rundeck?.feature?.repository?.enabled}"/>
+
+<style>
+.dropdown-submenu {
+  position: relative;
+}
+
+.dropdown-submenu .dropdown-menu {
+  top: 0;
+  right: 100%;
+  margin-top: -1px;
+  display: none;
+}
+</style>
+
 <ul class="dropdown-menu">
   <li class="dropdown-header">System</li>
   <li>
@@ -53,10 +88,78 @@
       </g:link>
     </li>
   </g:if>
+<g:if test="${pluginRead && repoEnabled == 'true'}">
+  <li class="dropdown-submenu">
+    <a href="#">Plugins <span class="caret"></span></a>
+    <ul class="dropdown-menu">
+      <li>
+        <a href="${g.createLink(uri:'/artifact/index/repositories')}">
+            <g:message code="gui.menu.FindPlugins"/>
+        </a>
+      </li>
+      <li>
+        <a href="${g.createLink(uri:'/artifact/index/configurations')}">
+          <g:message code="gui.menu.InstalledPlugins"/>
+        </a>
+      </li>
+      <li>
+        <a href="${g.createLink(uri:'/artifact/index/upload')}">
+          <g:message code="gui.menu.UploadPlugin"/>
+        </a>
+      </li>
+      <%-- <li>
+        <a href="${g.createLink(uri:'/menu/plugins')}">
+          Old Installed Plugins
+        </a>
+      </li> --%>
+    </ul>
+  </li>
+</g:if>
+<g:if test="${pluginRead && repoEnabled != 'true'}">
   <li>
-    <g:link controller="menu" action="plugins">
-      <g:message code="gui.menu.ListPlugins"/>
+    <a href="${g.createLink(uri:'/artifact/index/configurations')}">
+      <g:message code="gui.menu.InstalledPlugins"/>
+    </a>
+  </li>
+</g:if>
+<g:if test="${pluginInstall && repoEnabled != 'true'}">
+  <li>
+    <a href="${g.createLink(uri:'/artifact/index/upload')}">
+      <g:message code="gui.menu.UploadPlugin"/>
+    </a>
+  </li>
+</g:if>
+  <li>
+    <g:link controller="passwordUtility" action="index">
+      <g:message code="gui.menu.PasswordUtility"/>
     </g:link>
   </li>
+   <g:if test="${authAdmin}">
+      <li>
+        <g:link controller="menu" action="userSummary">
+          <g:message code="gui.menu.Users"/>
+        </g:link>
+      </li>
+  </g:if>
+    <g:ifMenuItems type="SYSTEM_CONFIG">
+        <li role="separator" class="divider"></li>
+    </g:ifMenuItems>
+    <g:forMenuItems type="SYSTEM_CONFIG" var="item">
+        <li>
+            <a href="${enc(attr:item.href)}"
+               title="${enc(attr:g.message(code:item.titleCode,default:item.title))}">
+                <g:message code="${item.titleCode}" default="${item.title}"/>
+            </a>
+        </li>
+    </g:forMenuItems>
   <g:render template="/menu/sysConfigExecutionModeNavMenu"/>
 </ul>
+<script>
+jQuery(document).ready(function($){
+  $('.dropdown-submenu > a').on("click", function(e){
+    $(this).next('ul').toggle();
+    e.stopPropagation();
+    e.preventDefault();
+  });
+});
+</script>

@@ -17,12 +17,17 @@
 package com.dtolabs.rundeck.server.plugins
 
 import com.dtolabs.rundeck.core.common.Framework
+import com.dtolabs.rundeck.core.common.IFramework
 import com.dtolabs.rundeck.core.execution.service.ExecutionServiceException
 import com.dtolabs.rundeck.core.execution.service.MissingProviderException
 import com.dtolabs.rundeck.core.execution.service.ProviderLoaderException
 import com.dtolabs.rundeck.core.plugins.CloseableProvider
+import com.dtolabs.rundeck.core.plugins.ConfiguredPlugin
+import com.dtolabs.rundeck.core.plugins.DescribedPlugin
 import com.dtolabs.rundeck.core.plugins.PluginMetadata
+import com.dtolabs.rundeck.core.plugins.PluginRegistry
 import com.dtolabs.rundeck.core.plugins.PluginResourceLoader
+import com.dtolabs.rundeck.core.plugins.ValidatedPlugin
 import com.dtolabs.rundeck.core.plugins.configuration.PluginAdapterUtility
 import com.dtolabs.rundeck.core.plugins.configuration.PropertyResolver
 import com.dtolabs.rundeck.core.plugins.configuration.PropertyResolverFactory
@@ -34,10 +39,12 @@ import com.dtolabs.rundeck.core.plugins.configuration.Description
 import com.dtolabs.rundeck.core.plugins.configuration.PropertyScope
 import com.dtolabs.rundeck.core.plugins.configuration.Validator
 import com.dtolabs.rundeck.core.utils.IPropertyLookup
+import com.dtolabs.rundeck.plugins.CorePluginProviderServices
 import com.dtolabs.rundeck.plugins.ServiceTypes
 import com.dtolabs.rundeck.plugins.util.DescriptionBuilder
 import com.dtolabs.rundeck.server.plugins.services.PluginBuilder
-import org.apache.log4j.Logger
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.BeanNotOfRequiredTypeException
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.beans.factory.NoSuchBeanDefinitionException
@@ -52,7 +59,7 @@ import org.springframework.context.ApplicationContextAware
  * Time: 7:07 PM
  */
 class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, InitializingBean {
-    public static Logger log = Logger.getLogger(RundeckPluginRegistry.class.name)
+    public static Logger log = LoggerFactory.getLogger(RundeckPluginRegistry.class.name)
     /**
      * Registry of spring bean plugin providers, "providername"->"beanname"
      */
@@ -82,14 +89,28 @@ class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, 
         }
     }
     
-    private String createServiceName(final String simpleName) {
+    String createServiceName(final String simpleName) {
         if (simpleName.endsWith("Plugin")) {
             return simpleName.substring(0, simpleName.length() - "Plugin".length());
         }
-        return simpleName + "Service";
+        return simpleName;
     }
+
+    public <T> boolean isFrameworkDependentPluginType(Class<T> type) {
+        return CorePluginProviderServices.isFrameworkDependentPluginType(type)
+    }
+
+    @Override
+    def <T> PluggableProviderService<T> getFrameworkDependentPluggableService(
+            final Class<T> type,
+            final Framework framework
+    ) {
+        return CorePluginProviderServices.getPluggableProviderServiceForType(type,framework)
+    }
+
     public <T> PluggableProviderService<T> createPluggableService(Class<T> type) {
-        def name = createServiceName(type.getSimpleName())
+        String found = ServiceTypes.pluginTypesMap.find { it.value == type }?.key
+        def name = found ?: createServiceName(type.getSimpleName())
         rundeckServerServiceProviderLoader.createPluginService(type, name)
     }
     /**
@@ -118,13 +139,13 @@ class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, 
     public <T> ConfiguredPlugin<T> configurePluginByName(
             String name,
             PluggableProviderService<T> service,
-            Framework framework,
+            IFramework framework,
             String project, Map instanceConfiguration
     )
     {
 
         final PropertyResolver resolver = PropertyResolverFactory.createFrameworkProjectRuntimeResolver(framework,
-                project, instanceConfiguration, name, service.getName());
+                project, instanceConfiguration, service.getName(), name);
         return configurePluginByName(name, service, resolver, PropertyScope.Instance)
     }
 
@@ -214,7 +235,7 @@ class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, 
         }
         return config
     }
-/**
+    /**
      *
      * Validate a provider for a service using the framework, project name and instance configuration map
      * @param name name of bean or provider
@@ -226,12 +247,12 @@ class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, 
      */
     public ValidatedPlugin validatePluginByName(
             String name, PluggableProviderService service,
-            Framework framework,
+            IFramework framework,
             String project, Map instanceConfiguration
     )
     {
         final PropertyResolver resolver = PropertyResolverFactory.createFrameworkProjectRuntimeResolver(framework,
-                project, instanceConfiguration, name, service.getName());
+                project, instanceConfiguration, service.getName(), name);
         return validatePluginByName(name, service, resolver, PropertyScope.Instance)
     }
 
@@ -353,7 +374,7 @@ class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, 
      * @return DescribedPlugin, or null if it cannot be loaded
      */
     public <T> DescribedPlugin<T> loadPluginDescriptorByName(String name, PluggableProviderService<T> service) {
-        DescribedPlugin<T> beanPlugin = loadBeanDescriptor(name)
+         DescribedPlugin<T> beanPlugin = loadBeanDescriptor(name)
         if (null != beanPlugin) {
             return beanPlugin
         }
@@ -506,7 +527,7 @@ class RundeckPluginRegistry implements ApplicationContextAware, PluginRegistry, 
     @Override
     PluginMetadata getPluginMetadata(final String service, final String provider) throws ProviderLoaderException {
         if (pluginRegistryMap[provider]) {
-            Class groovyPluginType = ServiceTypes.TYPES[service]
+            Class groovyPluginType = ServiceTypes.getPluginType(service)
             String beanName=pluginRegistryMap[provider]
             try {
                 def bean = findBean(beanName)

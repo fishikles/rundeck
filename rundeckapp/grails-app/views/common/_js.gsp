@@ -19,6 +19,8 @@
     <g:set var="currentProject" value="${params.project?:request.project}"/>
     <g:set var="projParams" value="${currentProject?[project:currentProject]:[:]}"/>
     var appLinks = {
+        api_version: '${com.dtolabs.rundeck.app.api.ApiVersions.API_CURRENT_VERSION}',
+        project_name: '${params.project ?: request.project}',
         disclosureIcon: '${resource(dir:"images",file:"icon-tiny-disclosure.png")}',
         disclosureIconOpen: '${resource(dir:"images",file:"icon-tiny-disclosure-open.png")}',
         iconTinyWarn: '${resource(dir:"images",file:"icon-tiny-warn.png")}',
@@ -26,6 +28,7 @@
         iconSmallRemoveX: '${resource(dir:"images",file:"icon-small-removex.png")}',
         iconTinyRemoveX: '${resource(dir:"images",file:"icon-tiny-removex.png")}',
         iconSpinner: '${resource(dir:"images",file:"icon-tiny-disclosure-waiting.gif")}',
+        projectMOTD: '${createLink(uri:"/api/${com.dtolabs.rundeck.app.api.ApiVersions.API_CURRENT_VERSION}/project/${currentProject}/motd.md")}',
         executionCancelExecution: '${createLink(controller:"execution",action:"cancelExecution",params:[format:'json'])}',
         executionMarkExecutionIncomplete: '${createLink(controller:"execution",action:"incompleteExecution",params:[format:'json'])}',
         tailExecutionOutput: '${createLink(controller: "execution", action: "tailExecutionOutput",params:[format:'json'])}',
@@ -43,7 +46,12 @@
         frameworkReloadNodes: "${createLink(controller:"framework",action:"reloadNodes",params:projParams)}",
         frameworkNodeSummaryAjax: "${createLink(controller:"framework",action:"nodeSummaryAjax",params:projParams)}",
         frameworkDeleteNodeFilterAjax: "${createLink(controller:"framework",action:"deleteNodeFilterAjax",params:projParams)}",
+        menuDeleteJobFilterAjax: "${createLink(controller:"menu",action:"deleteJobFilterAjax",params:projParams)}",
+        menuSaveJobFilterAjax: "${createLink(controller:"menu",action:"saveJobFilterAjax",params:projParams)}",
         reportsEventsAjax: "${g.createLink(controller: 'reports', action: 'eventsAjax',params:projParams)}",
+        reportsListFiltersAjax: "${g.createLink(controller: 'reports', action: 'listFiltersAjax',params:projParams)}",
+        reportsSaveFilterAjax: "${g.createLink(controller: 'reports', action: 'saveFilterAjax',params:projParams)}",
+        reportsDeleteFilterAjax: "${g.createLink(controller: 'reports', action: 'deleteFilterAjax',params:projParams)}",
         menuNowrunningAjax: "${g.createLink(controller: 'menu', action: 'nowrunningAjax',params:projParams)}",
         menuHomeAjax: "${g.createLink(controller: 'menu', action: 'homeAjax',params:projParams)}",
         menuHomeSummaryAjax: "${g.createLink(controller: 'menu', action: 'homeSummaryAjax',params:projParams)}",
@@ -69,6 +77,7 @@
         userGenerateUserToken: "${g.createLink(controller: 'user', action: 'generateUserToken',params:[format:'json'])}",
         userRevealTokenData: "${g.createLink(controller: 'user', action: 'renderUsertoken',params:[format:'json'])}",
         userRenderApiToken: "${g.createLink(controller: 'user', action: 'renderApiToken')}",
+        userProfilePage: "${g.createLink(controller: 'user', action: 'profile')}",
 
         workflowEdit: '${createLink(controller:"workflow",action:"edit",params:projParams)}',
         workflowCopy: '${createLink(controller:"workflow",action:"copy",params:projParams)}',

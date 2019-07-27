@@ -21,34 +21,53 @@ import com.dtolabs.rundeck.app.api.jobs.info.JobInfo
 import com.dtolabs.rundeck.app.api.jobs.info.JobInfoList
 import com.dtolabs.rundeck.app.support.AclFile
 import com.dtolabs.rundeck.app.support.BaseQuery
+import com.dtolabs.rundeck.app.support.ExecutionQuery
 import com.dtolabs.rundeck.app.support.ProjAclFile
 import com.dtolabs.rundeck.app.support.QueueQuery
 import com.dtolabs.rundeck.app.support.SaveProjAclFile
 import com.dtolabs.rundeck.app.support.SaveSysAclFile
 import com.dtolabs.rundeck.app.support.ScheduledExecutionQuery
+import com.dtolabs.rundeck.app.support.ScheduledExecutionQueryFilterCommand
 import com.dtolabs.rundeck.app.support.StoreFilterCommand
 import com.dtolabs.rundeck.app.support.SysAclFile
 import com.dtolabs.rundeck.core.authorization.AuthContext
+import com.dtolabs.rundeck.core.authorization.AuthorizationUtil
 import com.dtolabs.rundeck.core.authorization.UserAndRolesAuthContext
 import com.dtolabs.rundeck.core.common.Framework
+import com.dtolabs.rundeck.core.common.IFramework
 import com.dtolabs.rundeck.core.common.IRundeckProject
+import com.dtolabs.rundeck.core.execution.service.FileCopier
+import com.dtolabs.rundeck.core.execution.service.NodeExecutor
+import com.dtolabs.rundeck.core.execution.workflow.steps.StepExecutor
+import com.dtolabs.rundeck.core.execution.workflow.steps.node.NodeStepExecutor
+import com.dtolabs.rundeck.core.extension.ApplicationExtension
 import com.dtolabs.rundeck.core.plugins.configuration.PropertyScope
+import com.dtolabs.rundeck.core.resources.ResourceModelSourceFactory
+import com.dtolabs.rundeck.core.resources.format.ResourceFormatGenerator
+import com.dtolabs.rundeck.core.resources.format.ResourceFormatParser
 import com.dtolabs.rundeck.plugins.file.FileUploadPlugin
 import com.dtolabs.rundeck.plugins.logging.LogFilterPlugin
 import com.dtolabs.rundeck.plugins.logs.ContentConverterPlugin
+import com.dtolabs.rundeck.plugins.orchestrator.OrchestratorPlugin
+import com.dtolabs.rundeck.plugins.option.OptionValuesPlugin
 import com.dtolabs.rundeck.plugins.scm.ScmPluginException
+import com.dtolabs.rundeck.plugins.step.NodeStepPlugin
+import com.dtolabs.rundeck.plugins.step.RemoteScriptNodeStepPlugin
+import com.dtolabs.rundeck.plugins.step.StepPlugin
 import com.dtolabs.rundeck.plugins.storage.StorageConverterPlugin
 import com.dtolabs.rundeck.plugins.storage.StoragePlugin
 import com.dtolabs.rundeck.server.authorization.AuthConstants
 import com.dtolabs.rundeck.server.plugins.services.StorageConverterPluginProviderService
 import com.dtolabs.rundeck.server.plugins.services.StoragePluginProviderService
 import grails.converters.JSON
+import groovy.transform.PackageScope
 import groovy.xml.MarkupBuilder
 import org.grails.plugins.metricsweb.MetricService
 import org.rundeck.util.Sizes
 import org.springframework.context.ApplicationContext
 import org.springframework.context.ApplicationContextAware
 import org.springframework.web.multipart.MultipartHttpServletRequest
+import rundeck.AuthToken
 import rundeck.Execution
 import rundeck.LogFileStorageRequest
 import rundeck.Project
@@ -65,6 +84,7 @@ import rundeck.services.FrameworkService
 import rundeck.services.LogFileStorageService
 import rundeck.services.LoggingService
 import rundeck.services.NotificationService
+import rundeck.services.PluginApiService
 import rundeck.services.PluginService
 import rundeck.services.ScheduledExecutionService
 import rundeck.services.ScmService
@@ -87,6 +107,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
     StoragePluginProviderService storagePluginProviderService
     StorageConverterPluginProviderService storageConverterPluginProviderService
     PluginService pluginService
+    PluginApiService pluginApiService
     MetricService metricService
 
     def configurationService
@@ -98,6 +119,8 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
     static allowedMethods = [
             deleteJobfilter                : 'POST',
             storeJobfilter                 : 'POST',
+            deleteJobFilterAjax            : 'POST',
+            saveJobFilterAjax              : 'POST',
             apiJobDetail                   : 'GET',
             apiResumeIncompleteLogstorage  : 'POST',
             cleanupIncompleteLogStorageAjax:'POST',
@@ -115,7 +138,8 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         render(view:"index",model:results)
     }
 
-    def nowrunning={ QueueQuery query->
+    @PackageScope
+    def nowrunning(QueueQuery query) {
         //find currently running executions
         
         if(params['Clear']){
@@ -205,8 +229,11 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                         id: it.scheduledExecution.extid,
                         params:[project:it.scheduledExecution.project]
                 )
-                if (it.scheduledExecution && it.scheduledExecution.totalTime >= 0 && it.scheduledExecution.execCount > 0) {
-                    data['jobAverageDuration']= Math.floor(it.scheduledExecution.totalTime / it.scheduledExecution.execCount)
+                if (it.scheduledExecution){
+                    def avgDur = it.scheduledExecution.getAverageDuration()
+                    if(avgDur > 0) {
+                        data['jobAverageDuration'] = avgDur
+                    }
                 }
                 if (it.argString) {
                     data.jobArguments = FrameworkService.parseOptsFromString(it.argString)
@@ -395,9 +422,8 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                             }
                         }
                     }
-                    if (se.totalTime >= 0 && se.execCount > 0) {
-                        def long avg = Math.floor(se.totalTime / se.execCount)
-                        data.averageDuration = avg
+                    if (se.getAverageDuration() > 0) {
+                        data.averageDuration = se.getAverageDuration()
                     }
                     JobInfo.from(
                             se,
@@ -461,7 +487,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                         scmService.initProject(params.project, 'export')
                     }
                     if(minScm){
-                        scmService.fixExportStatus(params.project, results.nextScheduled)
+                        scmService.fixExportStatus(authContext, params.project, results.nextScheduled)
                     }
                 }
                 def pluginData = [:]
@@ -471,7 +497,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                         if(pluginData.scmExportEnabled){
 
                             if(!minScm){
-                                pluginData.scmStatus = scmService.exportStatusForJobs(results.nextScheduled)
+                                pluginData.scmStatus = scmService.exportStatusForJobs(authContext, results.nextScheduled)
                                 pluginData.scmExportStatus = scmService.exportPluginStatus(authContext, params.project)
                                 pluginData.scmExportRenamed = scmService.getRenamedJobPathsForProject(params.project)
                             }
@@ -495,7 +521,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                         scmService.initProject(params.project, 'import')
                     }
                     if(minScm){
-                        scmService.fixImportStatus(params.project, results.nextScheduled)
+                        scmService.fixImportStatus(authContext, params.project, results.nextScheduled)
                         scmService.importPluginStatus(authContext, params.project)
                     }
                 }
@@ -506,7 +532,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                         if(pluginData.scmImportEnabled){
 
                             if(!minScm){
-                                pluginData.scmImportJobStatus = scmService.importStatusForJobs(results.nextScheduled)
+                                pluginData.scmImportJobStatus = scmService.importStatusForJobs(authContext, results.nextScheduled)
                                 pluginData.scmImportStatus = scmService.importPluginStatus(authContext, params.project)
                             }
                             pluginData.scmImportActions = scmService.importPluginActions(authContext, params.project)
@@ -799,6 +825,105 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         redirect(controller:'menu',action:'jobs',params:[project: params.project])
         }.invalidToken{
             renderErrorView(g.message(code:'request.error.invalidtoken.message'))
+        }
+    }
+
+    def deleteJobFilterAjax(String project, String filtername) {
+        withForm {
+            g.refreshFormTokensHeader()
+            def User u = userService.findOrCreateUser(session.user)
+            final def ffilter = ScheduledExecutionFilter.findByNameAndUser(filtername, u)
+            if (ffilter) {
+                ffilter.delete(flush: true)
+            }
+            render(contentType: 'application/json') {
+                success true
+            }
+        }.invalidToken {
+            return apiService.renderErrorFormat(
+                    response, [
+                    status: HttpServletResponse.SC_BAD_REQUEST,
+                    code  : 'request.error.invalidtoken.message',
+            ]
+            )
+        }
+    }
+
+    def saveJobFilterAjax(ScheduledExecutionQueryFilterCommand query) {
+        withForm {
+            g.refreshFormTokensHeader()
+            if (query.hasErrors()) {
+                return apiService.renderErrorFormat(
+                        response, [
+                        status: HttpServletResponse.SC_BAD_REQUEST,
+                        code  : 'api.error.invalid.request',
+                        args  : [query.errors.allErrors.collect { it.toString() }.join("; ")]
+                ]
+                )
+            }
+            def User u = userService.findOrCreateUser(session.user)
+            def ScheduledExecutionFilter filter
+            def boolean saveuser = false
+            if (query.newFilterName && !query.existsFilterName) {
+                if (ScheduledExecutionFilter.findByNameAndUser(query.newFilterName, u)) {
+                    return apiService.renderErrorFormat(
+                            response, [
+                            status: HttpServletResponse.SC_BAD_REQUEST,
+                            code  : 'request.error.conflict.already-exists.message',
+                            args  : ["Job Filter", query.newFilterName]
+                    ]
+                    )
+                }
+                filter = ScheduledExecutionFilter.fromQuery(query)
+                filter.name = query.newFilterName
+                filter.user = u
+                if (!filter.validate()) {
+                    return apiService.renderErrorFormat(
+                            response, [
+                            status: HttpServletResponse.SC_BAD_REQUEST,
+                            code  : 'api.error.invalid.request',
+                            args  : [filter.errors.allErrors.collect { it.toString() }.join("; ")]
+                    ]
+                    )
+                }
+                u.addToJobfilters(filter)
+                saveuser = true
+            } else if (query.existsFilterName) {
+                filter = ScheduledExecutionFilter.findByNameAndUser(query.existsFilterName, u)
+                if (filter) {
+                    filter.properties = query.properties
+                    filter.fix()
+                }
+            }
+            if (!filter.save(flush: true)) {
+                flash.errors = filter.errors
+//                params.saveFilter = true
+                return apiService.renderErrorFormat(
+                        response, [
+                        status: HttpServletResponse.SC_BAD_REQUEST,
+                        code  : 'api.error.invalid.request',
+                        args  : [filter.errors.allErrors.collect { it.toString() }.join("; ")]
+                ]
+                )
+            }
+            if (saveuser) {
+                if (!u.save(flush: true)) {
+                    return renderErrorView([beanErrors: filter.errors])
+                }
+            }
+
+            render(contentType: 'application/json') {
+                success true
+                filterName query.newFilterName
+            }
+        }.invalidToken {
+
+            return apiService.renderErrorFormat(
+                    response, [
+                    status: HttpServletResponse.SC_BAD_REQUEST,
+                    code  : 'request.error.invalidtoken.message',
+            ]
+            )
         }
     }
 
@@ -1171,6 +1296,10 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                 AuthConstants.ACTION_READ, 'System configuration')) {
             return
         }
+        if(!grailsApplication.config.dataSource.jndiName &&
+                grailsApplication.config.dataSource.driverClassName=='org.h2.Driver'){
+            flash.error=message(code: "development.mode.warning")
+        }
         [rundeckFramework: frameworkService.rundeckFramework]
     }
 
@@ -1243,7 +1372,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             meta.count = policiesvalidation?.policies?.countPolicies()
             //
             meta.policies = policiesvalidation?.policies?.policies.collect(){
-                def by = 'by:'
+                def by = it.isBy()?'by:':'notBy:'
                 if(it.groups?.size()>0){
                     by = by+' group: '+it.groups.join(", ")
                 }
@@ -1842,6 +1971,10 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                 AuthConstants.ACTION_READ, 'System configuration')) {
             return
         }
+        if(!grailsApplication.config.dataSource.jndiName &&
+                grailsApplication.config.dataSource.driverClassName=='org.h2.Driver'){
+            flash.error=message(code: "development.mode.warning")
+        }
 
         Date nowDate = new Date();
         String nodeName = servletContext.getAttribute("FRAMEWORK_NODE")
@@ -1860,8 +1993,10 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         Date startupDate = new Date(nowDate.getTime() - durationTime)
         int threadActiveCount = Thread.activeCount()
         def build = grailsApplication.metadata['build.ident']
+        def buildGit = grailsApplication.metadata['build.core.git.description']
         def base = servletContext.getAttribute("RDECK_BASE")
         boolean executionModeActive=configurationService.executionModeActive
+        String apiVersion = ApiVersions.API_CURRENT_VERSION
 
         def memmax = Runtime.getRuntime().maxMemory()
         def memfree = Runtime.getRuntime().freeMemory()
@@ -1872,6 +2007,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             nowDate: nowDate,
             nodeName: nodeName,
             appVersion: appVersion,
+            apiVersion: apiVersion,
             load: load,
             processorsCount: processorsCount,
             osName: osName,
@@ -1886,6 +2022,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             startupDate: startupDate,
             threadActiveCount: threadActiveCount,
             build: build,
+            buildGit: buildGit,
             base: base,
             memmax: memmax,
             memfree: memfree,
@@ -1898,6 +2035,12 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         def serverUUID=frameworkService.getServerUUID()
         if(serverUUID){
             info['serverUUID']=serverUUID
+        }
+
+        def extMeta = []
+        def loader = ServiceLoader.load(ApplicationExtension)
+        loader.each {
+            extMeta<<[(it.name):it.infoMetadata]
         }
         return [
                 schedulerThreadRatio:schedulerThreadRatio,
@@ -1955,9 +2098,11 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             [rundeck:
             [version: info.appVersion,
                 build: info.build,
+                buildGit: info.buildGit,
                 node: info.nodeName,
                 base: info.base,
                 serverUUID: info.serverUUID,
+                apiversion: info.apiVersion,
             ]],
             [
                     executions:[
@@ -1980,7 +2125,7 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                 implementationVersion: info.vmVersion
             ],
             ],
-        ]]
+        ] + extMeta]
     }
 
     def metrics(){
@@ -1991,161 +2136,36 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
     }
 
     def plugins(){
-        //list plugins and config settings for project/framework props
-
-        Framework framework = frameworkService.getRundeckFramework()
-
-        //framework level plugin descriptions
-        def pluginDescs= [
-            framework.getNodeExecutorService(),
-            framework.getFileCopierService(),
-            framework.getNodeStepExecutorService(),
-            framework.getStepExecutionService(),
-            framework.getResourceModelSourceService(),
-            framework.getResourceFormatParserService(),
-            framework.getResourceFormatGeneratorService(),
-            framework.getOrchestratorService(),
-        ].collectEntries{
-            [it.name, it.listDescriptions().sort {a,b->a.name<=>b.name}]
-        }
-
-        //web-app level plugin descriptions
-        pluginDescs[notificationService.notificationPluginProviderService.name]=notificationService.listNotificationPlugins().collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[loggingService.streamingLogReaderPluginProviderService.name]=loggingService.listStreamingReaderPlugins().collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[loggingService.streamingLogWriterPluginProviderService.name]=loggingService.listStreamingWriterPlugins().collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[logFileStorageService.executionFileStoragePluginProviderService.name]= logFileStorageService.listLogFileStoragePlugins().collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[storagePluginProviderService.name]= pluginService.listPlugins(StoragePlugin.class,storagePluginProviderService).collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[storageConverterPluginProviderService.name] = pluginService.listPlugins(StorageConverterPlugin.class, storageConverterPluginProviderService).collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[scmService.scmExportPluginProviderService.name]=scmService.listPlugins('export').collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs[scmService.scmImportPluginProviderService.name]=scmService.listPlugins('import').collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-
-        pluginDescs['FileUploadPluginService']=pluginService.listPlugins(FileUploadPlugin).collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs['LogFilter'] = pluginService.listPlugins(LogFilterPlugin).collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-        pluginDescs['ContentConverter']=pluginService.listPlugins(ContentConverterPlugin).collect {
-            it.value.description
-        }.sort { a, b -> a.name <=> b.name }
-
-
-        def uiPluginProfiles = [:]
-        def loadedFileNameMap=[:]
-        pluginDescs.each { svc, list ->
-            list.each { desc ->
-                def provIdent = svc + ":" + desc.name
-                uiPluginProfiles[provIdent] = uiPluginService.getProfileFor(svc, desc.name)
-                def filename = uiPluginProfiles[provIdent].metadata?.filename
-                if(filename){
-                    if(!loadedFileNameMap[filename]){
-                        loadedFileNameMap[filename]=[]
-                    }
-                    loadedFileNameMap[filename]<< provIdent
-                }
-            }
-        }
-
-        def defaultScopes=[
-                (framework.getNodeStepExecutorService().name) : PropertyScope.InstanceOnly,
-                (framework.getStepExecutionService().name) : PropertyScope.InstanceOnly,
-        ]
-        def bundledPlugins=[
-                (framework.getNodeExecutorService().name): framework.getNodeExecutorService().getBundledProviderNames(),
-                (framework.getFileCopierService().name): framework.getFileCopierService().getBundledProviderNames(),
-                (framework.getResourceFormatParserService().name): framework.getResourceFormatParserService().getBundledProviderNames(),
-                (framework.getResourceFormatGeneratorService().name): framework.getResourceFormatGeneratorService().getBundledProviderNames(),
-                (framework.getResourceModelSourceService().name): framework.getResourceModelSourceService().getBundledProviderNames(),
-                (storagePluginProviderService.name): storagePluginProviderService.getBundledProviderNames()+['db'],
-                FileUploadPluginService: ['filesystem-temp'],
-        ]
-        //list included plugins
-        def embeddedList = frameworkService.listEmbeddedPlugins(grailsApplication)
-        def embeddedFilenames=[]
-        if(embeddedList.success && embeddedList.pluginList){
-            embeddedFilenames=embeddedList.pluginList*.fileName
-        }
-        def specialConfiguration=[
-                (storagePluginProviderService.name):[
-                        description: message(code:"plugin.storage.provider.special.description"),
-                        prefix:"rundeck.storage.provider.[index].config."
-                ],
-                (storageConverterPluginProviderService.name):[
-                        description: message(code:"plugin.storage.converter.special.description"),
-                        prefix:"rundeck.storage.converter.[index].config."
-                ],
-                (framework.getResourceModelSourceService().name):[
-                        description: message(code:"plugin.resourceModelSource.special.description"),
-                        prefix:"resources.source.[index].config."
-                ],
-                (logFileStorageService.executionFileStoragePluginProviderService.name):[
-                        description: message(code:"plugin.executionFileStorage.special.description"),
-                ],
-                (scmService.scmExportPluginProviderService.name):[
-                        description: message(code:"plugin.scmExport.special.description"),
-                ],
-                (scmService.scmImportPluginProviderService.name):[
-                        description: message(code:"plugin.scmImport.special.description"),
-                ],
-                FileUploadPluginService:[
-                        description: message(code:"plugin.FileUploadPluginService.special.description"),
-                ]
-        ]
-        def specialScoping=[
-                (scmService.scmExportPluginProviderService.name):true,
-                (scmService.scmImportPluginProviderService.name):true
-        ]
-
-        [
-                descriptions        : pluginDescs,
-                serviceDefaultScopes: defaultScopes,
-                bundledPlugins      : bundledPlugins,
-                embeddedFilenames   : embeddedFilenames,
-                specialConfiguration: specialConfiguration,
-                specialScoping      : specialScoping,
-                uiPluginProfiles    : uiPluginProfiles
-        ]
+        pluginApiService.listPluginsDetailed()
     }
 
     def home() {
         //first-run html info
         def isFirstRun=false
 
-        if(configurationService.getBoolean("startup.detectFirstRun",true) &&
-                frameworkService.rundeckFramework.hasProperty('framework.var.dir')) {
-            def vardir = frameworkService.rundeckFramework.getProperty('framework.var.dir')
-            String buildIdent = grailsApplication.metadata.getProperty('build.ident', String)
-            def vers = buildIdent.replaceAll('\\s+\\(.+\\)$','')
-            def file = new File(vardir, ".first-run-${vers}")
-            if(!file.exists()){
-                isFirstRun=true
-                file.withWriter("UTF-8"){out->
-                    out.write('#'+(new Date().toString()))
+        if (configurationService.getBoolean('startup.alwaysFirstRun', false)) {
+            isFirstRun=true
+        }else{
+            if(configurationService.getBoolean("startup.detectFirstRun",true) &&
+                    frameworkService.rundeckFramework.hasProperty('framework.var.dir')) {
+                def vardir = frameworkService.rundeckFramework.getProperty('framework.var.dir')
+                String buildIdent = grailsApplication.metadata.getProperty('build.ident', String)
+                def vers = buildIdent.replaceAll('\\s+\\(.+\\)$','')
+                def file = new File(vardir, ".first-run-${vers}")
+                if(!file.exists()){
+                    isFirstRun=true
+                    file.withWriter("UTF-8"){out->
+                        out.write('#'+(new Date().toString()))
+                    }
                 }
             }
         }
+
         AuthContext authContext = frameworkService.getAuthContextForSubject(session.subject)
         long start = System.currentTimeMillis()
-        def fprojects = frameworkService.projectNames(authContext)
-        def flabels = frameworkService.projectLabels(authContext)
-        session.frameworkProjects = fprojects
-        session.frameworkLabels = flabels
+
+        def fprojects = frameworkService.refreshSessionProjects(authContext, session)
+
         log.debug("frameworkService.projectNames(context)... ${System.currentTimeMillis() - start}")
         def stats=cachedSummaryProjectStats(fprojects)
         
@@ -2209,13 +2229,13 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         long proj2 = System.currentTimeMillis()
         def executionResults = projectNames?Execution.createCriteria().list {
             gt('dateStarted', lastday)
-            inList('project', projectNames)
             projections {
                 property('project')
                 property('status')
                 property('user')
             }
         }:[]
+        executionResults = executionResults.findAll{projectNames.contains(it[0])}
         proj2 = System.currentTimeMillis() - proj2
         long proj3 = System.currentTimeMillis()
         def projexecs = executionResults.groupBy { it[0] }
@@ -2265,12 +2285,12 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         long proj2=System.currentTimeMillis()
         def projects2 = projectNames?Execution.createCriteria().list {
             gt('dateStarted', today)
-            inList('project', projectNames)
             projections {
                 groupProperty('project')
                 count()
             }
         }:[]
+        projects2 = projects2.findAll{projectNames.contains(it[0])}
         proj2=System.currentTimeMillis()-proj2
         def execCount= 0 //Execution.countByDateStartedGreaterThan( today)
         projects2.each{val->
@@ -2286,12 +2306,12 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         def failedExecs = projectNames? Execution.createCriteria().list {
             gt('dateStarted', today)
             inList('status', ['false', 'failed'])
-            inList('project', projectNames)
             projections {
                 groupProperty('project')
                 count()
             }
         }:[]
+        failedExecs = failedExecs.findAll{projectNames.contains(it[0])}
         failedExecs.each{val->
             if(val.size()==2){
                 if(summary[val[0]]) {
@@ -2304,12 +2324,12 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         long proj3=System.currentTimeMillis()
         def users2 = projectNames?Execution.createCriteria().list {
             gt('dateStarted', today)
-            inList('project', projectNames)
             projections {
                 distinct('user')
                 property('project')
             }
         }:[]
+        users2=users2.findAll {projectNames.contains(it[1])}
         proj3=System.currentTimeMillis()-proj3
         def users = new HashSet<String>()
         users2.each{val->
@@ -2405,6 +2425,10 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             }
             summary[project.name].label= project.hasProperty("project.label")?project.getProperty("project.label"):''
             summary[project.name].description= description
+            def eventAuth=frameworkService.authorizeProjectResourceAll(authContext, AuthorizationUtil.resourceType('event'), [AuthConstants.ACTION_READ], project.name)
+            if(!eventAuth){
+                summary[project.name].putAll([ execCount: 0, failedCount: 0,userSummary: [], userCount: 0])
+            }
             if(!params.refresh) {
                 summary[project.name].readmeDisplay = menuService.getReadmeDisplay(project)
                 summary[project.name].motdDisplay = menuService.getMotdDisplay(project)
@@ -2495,9 +2519,13 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                 'succeededCount',
                 'failedCount',
                 'queuedCount',
+                'queuedRequestCount',
+                'queuedRetriesCount',
+                'queuedIncompleteCount',
                 'totalCount',
                 'incompleteCount',
-                'missingCount'
+                'missingCount',
+                'retriesCount'
         ]
         withFormat {
             json {
@@ -2776,9 +2804,8 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             extra.serverNodeUUID = scheduledExecution.serverNodeUUID
             extra.serverOwner = scheduledExecution.serverNodeUUID == serverNodeUUID
         }
-        if (scheduledExecution.totalTime >= 0 && scheduledExecution.execCount > 0) {
-            def long avg = Math.floor(scheduledExecution.totalTime / scheduledExecution.execCount)
-            extra.averageDuration = avg
+        if (scheduledExecution.getAverageDuration()>0) {
+            extra.averageDuration = scheduledExecution.getAverageDuration()
         }
         if(scheduledExecution.shouldScheduleExecution()){
             extra.nextScheduledExecution=scheduledExecutionService.nextExecutionTime(scheduledExecution)
@@ -2794,6 +2821,131 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
 
                 [formats: ['xml', 'json']]
         )
+    }
+
+
+    def apiJobForecast() {
+        if (!apiService.requireVersion(request, response, ApiVersions.V31)) {
+            return
+        }
+
+        if (!apiService.requireParameters(params, response, ['id'])) {
+            return
+        }
+
+        def ScheduledExecution scheduledExecution = scheduledExecutionService.getByIDorUUID(params.id)
+
+        if (!apiService.requireExists(response, scheduledExecution, ['Job ID', params.id])) {
+            return
+        }
+        AuthContext authContext = frameworkService.getAuthContextForSubjectAndProject(
+                session.subject,
+                scheduledExecution.project
+        )
+        if (!frameworkService.authorizeProjectJobAny(
+                authContext,
+                scheduledExecution,
+                [AuthConstants.ACTION_READ, AuthConstants.ACTION_VIEW],
+                scheduledExecution.project
+        )) {
+            return apiService.renderErrorXml(
+                    response,
+                    [
+                            status: HttpServletResponse.SC_FORBIDDEN,
+                            code  : 'api.error.item.unauthorized',
+                            args  : ['Read', 'Job ID', params.id]
+                    ]
+            )
+        }
+        if (!(response.format in ['all', 'xml', 'json'])) {
+            return apiService.renderErrorXml(
+                    response,
+                    [
+                            status: HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE,
+                            code  : 'api.error.item.unsupported-format',
+                            args  : [response.format]
+                    ]
+            )
+        }
+
+        def extra = [:]
+
+        //future scheduled executions forecast
+        def time = params.time? params.time : '1d'
+
+        def retro = ((request.api_version >= ApiVersions.V32) && (params.past=='true'))
+
+        Date futureDate = futureRelativeDate(time,retro)
+
+        def max = null
+        if (params.max) {
+            max = params.int('max')
+            if (max <= 0) {
+                max = null
+            }
+        }
+
+        if (scheduledExecution.shouldScheduleExecution()) {
+            extra.futureScheduledExecutions = scheduledExecutionService.nextExecutions(scheduledExecution, futureDate, retro)
+            if (max
+                    && extra.futureScheduledExecutions
+                    && extra.futureScheduledExecutions.size() > max) {
+                extra.futureScheduledExecutions = extra.futureScheduledExecutions[0..<max]
+            }
+        }
+
+
+        respond(
+
+                JobInfo.from(
+                        scheduledExecution,
+                        apiService.apiHrefForJob(scheduledExecution),
+                        apiService.guiHrefForJob(scheduledExecution),
+                        extra
+                ),
+
+                [formats: ['xml', 'json']]
+        )
+    }
+
+    private Date futureRelativeDate(String recentFilter, boolean negative=false){
+        Calendar n = GregorianCalendar.getInstance()
+        n.setTime(new Date())
+        def matcher = recentFilter =~ /^(\d+)([hdwmyns])$/
+        if (matcher.matches()) {
+            def i = matcher.group(1).toInteger()
+            def ndx
+            switch (matcher.group(2)) {
+                case 'h':
+                    ndx = Calendar.HOUR_OF_DAY
+                    break
+                case 'n':
+                    ndx = Calendar.MINUTE
+                    break
+                case 's':
+                    ndx = Calendar.SECOND
+                    break
+                case 'd':
+                    ndx = Calendar.DAY_OF_YEAR
+                    break
+                case 'w':
+                    ndx = Calendar.WEEK_OF_YEAR
+                    break
+                case 'm':
+                    ndx = Calendar.MONTH
+                    break
+                case 'y':
+                    ndx = Calendar.YEAR
+                    break
+            }
+            if(negative){
+                n.add(ndx, i*-1)
+            }else {
+                n.add(ndx, i)
+            }
+            return n.getTime()
+        }
+        null
     }
 
     private void respondApiJobsList(List<ScheduledExecution> results) {
@@ -3010,7 +3162,6 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
                     code: 'api.error.parameter.required', args: ['project']])
         }
         //test valid project
-        Framework framework = frameworkService.getRundeckFramework()
 
         //allow project='*' to indicate all projects
         def allProjects = request.api_version >= ApiVersions.V9 && params.project == '*'
@@ -3034,6 +3185,11 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
         if(params.offset){
             query.offset=params.int('offset')
         }
+
+        if (request.api_version >= ApiVersions.V31 && params.jobIdFilter) {
+            query.jobIdFilter = params.jobIdFilter
+        }
+        
         def results = nowrunning(query)
 
         withFormat{
@@ -3068,63 +3224,69 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
 
     def listExport(){
         UserAndRolesAuthContext authContext
-        def query = new ScheduledExecutionQuery()
-        query.idlist = params.nextScheduled
-        query.projFilter = params.project
-        authContext = frameworkService.getAuthContextForSubject(session.subject)
-        def result = listWorkflows(query, authContext,session.user)
 
         def results=[:]
-        if (frameworkService.authorizeApplicationResourceAny(authContext,
-                frameworkService.authResourceForProject(
-                        params.project
-                ),
-                [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_EXPORT]
-        )) {
-            def pluginData = [:]
-            if(frameworkService.isClusterModeEnabled()){
-                //initialize if in another node
-                scmService.initProject(params.project,'export')
-            }
-            try {
-                if (scmService.projectHasConfiguredExportPlugin(params.project)) {
-                    pluginData.scmExportEnabled = scmService.loadScmConfig(params.project, 'export')?.enabled
-                    if(pluginData.scmExportEnabled){
-                        pluginData.scmStatus = scmService.exportStatusForJobs(result.nextScheduled)
-                        pluginData.scmExportStatus = scmService.exportPluginStatus(authContext, params.project)
-                        pluginData.scmExportActions = scmService.exportPluginActions(authContext, params.project)
-                        pluginData.scmExportRenamed = scmService.getRenamedJobPathsForProject(params.project)
-                    }
-                    results.putAll(pluginData)
-                }
-            } catch (ScmPluginException e) {
-                results.warning = "Failed to update SCM Export status: ${e.message}"
-            }
-        }
-        if (frameworkService.authorizeApplicationResourceAny(authContext,
-                frameworkService.authResourceForProject(
-                        params.project
-                ),
-                [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_IMPORT]
-        )) {
-            if(frameworkService.isClusterModeEnabled()){
-                //initialize if in another node
-                scmService.initProject(params.project,'import')
-            }
-            def pluginData = [:]
-            try {
-                if (scmService.projectHasConfiguredImportPlugin(params.project)) {
-                    pluginData.scmImportEnabled = scmService.loadScmConfig(params.project, 'import')?.enabled
-                    if(pluginData.scmImportEnabled){
-                        pluginData.scmImportJobStatus = scmService.importStatusForJobs(result.nextScheduled)
-                        pluginData.scmImportStatus = scmService.importPluginStatus(authContext, params.project)
-                        pluginData.scmImportActions = scmService.importPluginActions(authContext, params.project)
-                    }
-                    results.putAll(pluginData)
-                }
+        if(request.format=='json' ) {
+            def data = request.JSON
+            def nextScheduled = data?.join(",")?.replaceAll(/"/, '')
+            def query = new ScheduledExecutionQuery()
+            query.idlist = nextScheduled //request.format   def data= request.JSON
+            query.projFilter = params.project
+            authContext = frameworkService.getAuthContextForSubject(session.subject)
+            def result = listWorkflows(query, authContext, session.user)
 
-            } catch (ScmPluginException e) {
-                results.warning = "Failed to update SCM Import status: ${e.message}"
+
+            if (frameworkService.authorizeApplicationResourceAny(authContext,
+                    frameworkService.authResourceForProject(
+                            params.project
+                    ),
+                    [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_EXPORT]
+            )) {
+                def pluginData = [:]
+                if (frameworkService.isClusterModeEnabled()) {
+                    //initialize if in another node
+                    scmService.initProject(params.project, 'export')
+                }
+                try {
+                    if (scmService.projectHasConfiguredExportPlugin(params.project)) {
+                        pluginData.scmExportEnabled = scmService.loadScmConfig(params.project, 'export')?.enabled
+                        if (pluginData.scmExportEnabled) {
+                            pluginData.scmStatus = scmService.exportStatusForJobs(authContext, result.nextScheduled)
+                            pluginData.scmExportStatus = scmService.exportPluginStatus(authContext, params.project)
+                            pluginData.scmExportActions = scmService.exportPluginActions(authContext, params.project)
+                            pluginData.scmExportRenamed = scmService.getRenamedJobPathsForProject(params.project)
+                        }
+                        results.putAll(pluginData)
+                    }
+                } catch (ScmPluginException e) {
+                    results.warning = "Failed to update SCM Export status: ${e.message}"
+                }
+            }
+            if (frameworkService.authorizeApplicationResourceAny(authContext,
+                    frameworkService.authResourceForProject(
+                            params.project
+                    ),
+                    [AuthConstants.ACTION_ADMIN, AuthConstants.ACTION_IMPORT]
+            )) {
+                if (frameworkService.isClusterModeEnabled()) {
+                    //initialize if in another node
+                    scmService.initProject(params.project, 'import')
+                }
+                def pluginData = [:]
+                try {
+                    if (scmService.projectHasConfiguredImportPlugin(params.project)) {
+                        pluginData.scmImportEnabled = scmService.loadScmConfig(params.project, 'import')?.enabled
+                        if (pluginData.scmImportEnabled) {
+                            pluginData.scmImportJobStatus = scmService.importStatusForJobs(authContext, result.nextScheduled)
+                            pluginData.scmImportStatus = scmService.importPluginStatus(authContext, params.project)
+                            pluginData.scmImportActions = scmService.importPluginActions(authContext, params.project)
+                        }
+                        results.putAll(pluginData)
+                    }
+
+                } catch (ScmPluginException e) {
+                    results.warning = "Failed to update SCM Import status: ${e.message}"
+                }
             }
         }
         render(results as JSON)
@@ -3173,6 +3335,34 @@ class MenuController extends ControllerBase implements ApplicationContextAware{
             }
         }
         return redirect(controller:'menu',action:'jobs', params: [project: params.project])
+    }
+
+    def userSummary(){
+        AuthContext authContext = frameworkService.getAuthContextForSubject(session.subject)
+        if(unauthorizedResponse(frameworkService.authorizeApplicationResourceType(authContext, AuthConstants.TYPE_USER,
+                AuthConstants.ACTION_ADMIN),
+                AuthConstants.ACTION_ADMIN, 'User', 'accounts')) {
+            return
+        }
+        def userList = [:]
+        User.listOrderByLogin().each {
+            def obj = [:]
+            obj.login = it.login
+            obj.firstName = it.firstName
+            obj.lastName = it.lastName
+            obj.email = it.email
+            obj.created = it.dateCreated
+            obj.updated = it.lastUpdated
+            def lastExec = Execution.lastExecutionByUser(it.login).list()
+            if(lastExec?.size()>0){
+                obj.lastJob = lastExec.get(0).dateStarted
+            }
+            def tokenList = AuthToken.findAllByUser(it)
+            obj.tokens = tokenList?.size()
+            userList.put(it.login,obj)
+        }
+
+        [users:userList]
     }
 }
 

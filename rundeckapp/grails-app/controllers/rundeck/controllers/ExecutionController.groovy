@@ -17,10 +17,12 @@
 package rundeck.controllers
 
 import com.dtolabs.client.utils.Constants
-
+import com.dtolabs.rundeck.app.api.ApiVersions
 import com.dtolabs.rundeck.app.api.jobs.upload.ExecutionFileInfoList
 import com.dtolabs.rundeck.app.api.jobs.upload.JobFileInfo
 import com.dtolabs.rundeck.app.support.BuilderUtil
+import com.dtolabs.rundeck.app.support.ExecutionQuery
+import com.dtolabs.rundeck.app.support.ExecutionQueryException
 import com.dtolabs.rundeck.app.support.ExecutionViewParams
 import com.dtolabs.rundeck.core.authorization.AuthContext
 import com.dtolabs.rundeck.core.common.PluginDisabledException
@@ -30,44 +32,38 @@ import com.dtolabs.rundeck.core.logging.LogEvent
 import com.dtolabs.rundeck.core.logging.LogUtil
 import com.dtolabs.rundeck.core.logging.ReverseSeekingStreamingLogReader
 import com.dtolabs.rundeck.core.logging.StreamingLogReader
-import com.dtolabs.rundeck.app.support.ExecutionQuery
+import com.dtolabs.rundeck.core.plugins.DescribedPlugin
 import com.dtolabs.rundeck.core.utils.OptsUtil
 import com.dtolabs.rundeck.plugins.ServiceNameConstants
 import com.dtolabs.rundeck.plugins.logging.LogFilterPlugin
 import com.dtolabs.rundeck.plugins.logs.ContentConverterPlugin
 import com.dtolabs.rundeck.server.authorization.AuthConstants
-import com.dtolabs.rundeck.server.plugins.DescribedPlugin
 import grails.converters.JSON
-import grails.web.JSONBuilder
-import grails.web.mapping.LinkGenerator
+import groovy.transform.PackageScope
+import org.hibernate.criterion.CriteriaSpecification
+import org.hibernate.type.StandardBasicTypes
 import org.quartz.JobExecutionContext
 import org.springframework.dao.DataAccessResourceFailureException
 import rundeck.CommandExec
 import rundeck.Execution
 import rundeck.ScheduledExecution
-import com.dtolabs.rundeck.app.api.ApiVersions
-import rundeck.services.ApiService
-import rundeck.services.ConfigurationService
-import rundeck.services.ExecutionService
-import rundeck.services.FileUploadService
-import rundeck.services.FrameworkService
-import rundeck.services.LoggingService
-import rundeck.services.OrchestratorPluginService
-import rundeck.services.PluginService
-import rundeck.services.ScheduledExecutionService
-import rundeck.services.WorkflowService
+import rundeck.services.*
 import rundeck.services.logging.ExecutionLogReader
 import rundeck.services.logging.ExecutionLogState
 import rundeck.services.workflow.StateMapping
 
 import javax.servlet.http.HttpServletResponse
+import java.sql.Time
 import java.text.ParseException
 import java.text.SimpleDateFormat
+import java.util.stream.Collectors
 
 /**
 * ExecutionController
 */
 class ExecutionController extends ControllerBase{
+    static final String FRAMEWORK_OUTPUT_ALLOW_UNSANITIZED = "framework.output.allowUnsanitized"
+    static final String PROJECT_OUTPUT_ALLOW_UNSANITIZED = "project.output.allowUnsanitized"
 
     FrameworkService frameworkService
     ExecutionService executionService
@@ -328,7 +324,9 @@ class ExecutionController extends ControllerBase{
     def bulkDelete(){
         withForm{
         def ids
-        if(params.bulk_edit){
+        if(params.checkedIds){
+            ids=params.checkedIds.toString().split(',').flatten()
+        }else if(params.bulk_edit){
             ids=[params.bulk_edit].flatten()
         }else if(params.ids){
             ids = [params.ids].flatten()
@@ -367,9 +365,8 @@ class ExecutionController extends ControllerBase{
         def execState = e.executionState
         def execDuration = (e.dateCompleted ? e.dateCompleted.getTime() : System.currentTimeMillis()) - e.dateStarted.getTime()
         def jobAverage=-1L
-        if (e.scheduledExecution && e.scheduledExecution.totalTime >= 0 && e.scheduledExecution.execCount > 0) {
-            def long avg = Math.floor(e.scheduledExecution.totalTime / e.scheduledExecution.execCount)
-            jobAverage = avg
+        if (e.scheduledExecution && e.scheduledExecution.getAverageDuration() > 0) {
+            jobAverage = e.scheduledExecution.getAverageDuration()
         }
         def isClusterExec = frameworkService.isClusterModeEnabled() && e.serverNodeUUID !=
                 frameworkService.getServerUUID()
@@ -447,10 +444,21 @@ class ExecutionController extends ControllerBase{
             render data as JSON
         }
     }
-    def ajaxExecNodeState(){
+
+    def ajaxExecNodeState(ExecutionViewParams viewparams) {
+        if (viewparams.hasErrors()) {
+            response.status = HttpServletResponse.SC_BAD_REQUEST
+            render(contentType: 'application/json') {
+                error = 'invalid'
+                errorMessage = g.message(code: 'api.error.invalid.request', args: [error: viewparams.errors.toString()])
+            }
+            return
+        }
+        if (requireAjax(action: 'show', controller: 'execution', params: params)) {
+            return
+        }
         def Execution e = Execution.get(params.id)
         if (!e) {
-            log.error("Execution not found for id: " + params.id)
             response.status=HttpServletResponse.SC_NOT_FOUND
             return render(contentType: 'application/json', text: [error: "Execution not found for id: " + params.id] as JSON)
         }
@@ -746,7 +754,7 @@ class ExecutionController extends ControllerBase{
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)
             def msg= g.message(code: reader.errorCode, args: reader.errorData)
             log.error("Output file reader error: ${msg}")
-            response.outputStream << msg
+            appendOutput(response, msg)
             return
         }else if (reader.state != ExecutionLogState.AVAILABLE) {
             //TODO: handle other states
@@ -754,7 +762,16 @@ class ExecutionController extends ControllerBase{
             log.error("Output file not available")
             return
         }
+        //default timezone is the server timezone
+        def reqTimezone = TimeZone.getDefault()
+        if (params.timeZone) {
+            reqTimezone = TimeZone.getTimeZone(params.timeZone)
+        } else if (params.gmt) {
+            reqTimezone = TimeZone.getTimeZone('GMT')
+        }
         SimpleDateFormat dateFormater = new SimpleDateFormat("yyyyMMdd-HHmmss",Locale.US);
+        dateFormater.timeZone = reqTimezone
+
         def dateStamp= dateFormater.format(e.dateStarted);
         response.setContentType("text/plain")
         if("inline"!=params.view){
@@ -766,7 +783,7 @@ class ExecutionController extends ControllerBase{
         }
 
         SimpleDateFormat logFormater = new SimpleDateFormat("HH:mm:ss", Locale.US);
-        logFormater.timeZone= TimeZone.getTimeZone("GMT")
+        logFormater.timeZone = reqTimezone
         def iterator = reader.reader
         iterator.openStream(0)
         def lineSep=System.getProperty("line.separator")
@@ -781,8 +798,8 @@ class ExecutionController extends ControllerBase{
                 } catch (Exception exc) {
                 }
             }
-            response.outputStream << (isFormatted?"${logFormater.format(msgbuf.datetime)} [${msgbuf.metadata?.user}@${msgbuf.metadata?.node} ${msgbuf.metadata?.stepctx?:'_'}][${msgbuf.loglevel}] ${message}" : message)
-            response.outputStream<<lineSep
+            appendOutput(response, (isFormatted?"${logFormater.format(msgbuf.datetime)} [${msgbuf.metadata?.user}@${msgbuf.metadata?.node} ${msgbuf.metadata?.stepctx?:'_'}][${msgbuf.loglevel}] ${message}" : message))
+            appendOutput(response, lineSep)
         }
         iterator.close()
     }
@@ -806,9 +823,38 @@ class ExecutionController extends ControllerBase{
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR)
             def msg= g.message(code: reader.errorCode, args: reader.errorData)
             log.error("Output file reader error: ${msg}")
-            response.outputStream << msg
+            appendOutput(response, msg)
             return
-        }else if (reader.state != ExecutionLogState.AVAILABLE) {
+        }else if(reader.state == ExecutionLogState.WAITING){
+            if(params.reload=='true') {
+                response.setContentType("text/html")
+                appendOutput(response, '''<html>
+                <head>
+                <title></title>
+                </head>
+                <body>
+                <div class="container">
+                <div class="row">
+                <div class="col-sm-12">
+                ''')
+                appendOutput(response, g.message(code: "execution.html.waiting"))
+                appendOutput(response, '''
+                </div>
+                <script>
+                setTimeout(function(){
+                   window.location.reload(1);
+                }, 5000);
+                </script>
+                </body>
+                </html>
+                ''')
+            }else{
+                response.setStatus(HttpServletResponse.SC_NOT_FOUND)
+                log.error("Output file not available")
+            }
+            return
+
+        } else if (reader.state != ExecutionLogState.AVAILABLE) {
             //TODO: handle other states
             response.setStatus(HttpServletResponse.SC_NOT_FOUND)
             log.error("Output file not available")
@@ -822,7 +868,8 @@ class ExecutionController extends ControllerBase{
         def iterator = reader.reader
         iterator.openStream(0)
         def lineSep=System.getProperty("line.separator")
-        response.outputStream<<"""<html>
+        response.setContentType("text/html")
+        appendOutput(response, """<html>
 <head>
 <title></title>
 <link rel="stylesheet" href="${g.assetPath(src:'app.less.css')}"  />
@@ -832,10 +879,11 @@ class ExecutionController extends ControllerBase{
 <div class="container">
 <div class="row">
 <div class="col-sm-12">
-<div class="ansicolor ansicolor-${(params.ansicolor in ['false','off'])?'off':'on'}" >"""
+<div class="ansicolor ansicolor-${(params.ansicolor in ['false','off'])?'off':'on'}" >""")
 
         def csslevel=!(params.loglevels in ['off','false'])
         def renderContent = shouldConvertContent(params)
+        boolean allowUnsanitized = checkAllowUnsanitized(e.project)
         iterator.each{ LogEvent msgbuf ->
             if(msgbuf.eventType != LogUtil.EVENT_TYPE_LOG){
                 return
@@ -851,7 +899,11 @@ class ExecutionController extends ControllerBase{
                 }
                 String result = convertContentDataType(message, msgbuf.metadata['content-data-type'], meta, 'text/html', e.project)
                 if (result != null) {
-                    msghtml = result.encodeAsSanitizedHTML()
+                    if(allowUnsanitized && meta["no-strip"] == "true") {
+                        msghtml = result
+                    } else {
+                        msghtml = result.encodeAsSanitizedHTML()
+                    }
                     converted = true
                 }
             }
@@ -864,21 +916,49 @@ class ExecutionController extends ControllerBase{
             }
             def css="log_line" + (csslevel?" level_${msgbuf.loglevel.toString().toLowerCase()}":'')
 
-            response.outputStream << "<div class=\"$css\" >"
-            response.outputStream << msghtml
-            response.outputStream << '</div>'
+            appendOutput(response, "<div class=\"$css\" >")
+            appendOutput(response, msghtml)
+            appendOutput(response, '</div>')
 
-            response.outputStream<<lineSep
+            appendOutput(response, lineSep)
         }
         iterator.close()
-
-        response.outputStream << '''</div>
+        if(jobcomplete || params.reload!='true'){
+            appendOutput(response, '''</div>
 </div>
 </div>
 </div>
 </body>
 </html>
-'''
+''')
+        }else{
+            appendOutput(response, '''</div>
+</div>
+</div>
+</div>
+<script>
+setTimeout(function(){
+   window.location.reload(1);
+}, 5000);
+</script>
+</body>
+</html>
+''')
+        }
+
+    }
+
+    boolean checkAllowUnsanitized(String project) {
+        if(frameworkService.getRundeckFramework().hasProperty(FRAMEWORK_OUTPUT_ALLOW_UNSANITIZED)) {
+            if ("true" != frameworkService.getRundeckFramework().
+                    getProperty(FRAMEWORK_OUTPUT_ALLOW_UNSANITIZED)) return false
+            def projectConfig = frameworkService.getRundeckFramework().projectManager.loadProjectConfig(project)
+            if(projectConfig.hasProperty(PROJECT_OUTPUT_ALLOW_UNSANITIZED)) {
+                return "true" == projectConfig.getProperty(PROJECT_OUTPUT_ALLOW_UNSANITIZED)
+            }
+            return false
+        }
+        return false
     }
 
     /**
@@ -1367,7 +1447,7 @@ class ExecutionController extends ControllerBase{
         def completed=false
         def max= 0
         def lastlinesSupported= (ReverseSeekingStreamingLogReader.isInstance(logread))
-        def lastlines = params.lastlines?Long.parseLong(params.lastlines):0
+        def lastlines = params.long('lastlines',0)
         if(lastlines && lastlinesSupported){
             def ReverseSeekingStreamingLogReader reversing= (ReverseSeekingStreamingLogReader) logread
             reversing.openStreamFromReverseOffset(lastlines)
@@ -1375,10 +1455,7 @@ class ExecutionController extends ControllerBase{
             max=lastlines+1
         }else{
             logread.openStream(offset)
-
-            if (null != params.maxlines) {
-                max = Integer.parseInt(params.maxlines)
-            }
+            max = Math.max(0,params.int('maxlines',0))
         }
 
         def String bufsizestr= servletContext.getAttribute("execution.follow.buffersize");
@@ -1445,7 +1522,7 @@ class ExecutionController extends ControllerBase{
 //        }
         if (shouldConvertContent(params)) {
             //interpret any log content
-
+            boolean allowUnsanitized = checkAllowUnsanitized(e.project)
             entry.each {logentry->
                 if (logentry.mesg && logentry['content-data-type']) {
                     //look up content-type
@@ -1461,7 +1538,11 @@ class ExecutionController extends ControllerBase{
                             e.project
                     )
                     if (result != null) {
-                        logentry.loghtml = result.encodeAsSanitizedHTML()
+                        if(allowUnsanitized && meta["no-strip"] == "true") {
+                            logentry.loghtml = result
+                        } else {
+                            logentry.loghtml = result.encodeAsSanitizedHTML()
+                        }
                     }
                 }
             }
@@ -1533,7 +1614,7 @@ class ExecutionController extends ControllerBase{
                 response.addHeader('X-Rundeck-ExecOutput-Completed', completed.toString())
                 response.addHeader('X-Rundeck-Exec-Completed', jobcomplete.toString())
                 response.addHeader('X-Rundeck-Exec-State', execState.toString())
-                response.addHeader('X-Rundeck-Exec-Status-String', statusString?.toString())
+                response.addHeader('X-Rundeck-Exec-Status-String', statusString?.toString()?:'')
                 response.addHeader('X-Rundeck-Exec-Duration', execDuration.toString())
                 response.addHeader('X-Rundeck-ExecOutput-LastModifed', lastmodl.toString())
                 response.addHeader('X-Rundeck-ExecOutput-TotalSize', totsize.toString())
@@ -1541,18 +1622,18 @@ class ExecutionController extends ControllerBase{
                 response.addHeader('X-Rundeck-ExecOutput-RetryBackoff', reader.retryBackoff.toString())
                 def lineSep = System.getProperty("line.separator")
                 response.setHeader("Content-Type","text/plain")
-                response.outputStream.withWriter("UTF-8"){w->
-                    entry.each{
-                        w<<it.mesg+lineSep
-                    }
+
+
+                entry.each{
+                    appendOutput(response, it.mesg+lineSep)
                 }
-                response.outputStream.close()
             }
         }
     }
 
     //TODO: move to a service
-    private String convertContentDataType(final Object input, final String inputDataType, Map<String,String> meta, final String outputType, String projectName) {
+    @PackageScope
+    String convertContentDataType(final Object input, final String inputDataType, Map<String,String> meta, final String outputType, String projectName) {
 //        log.error("find converter : ${input.class}(${inputDataType}) => ?($outputType)")
         def plugins = listViewPlugins()
 
@@ -2136,22 +2217,79 @@ class ExecutionController extends ControllerBase{
                 grailsApplication.config.rundeck?.pagination?.default?.max ?
                         grailsApplication.config.rundeck.pagination.default.max.toInteger() :
                         20
-        def results = executionService.queryExecutions(query, resOffset, resMax)
-        def result=results.result
-        def total=results.total
-        //filter query results to READ authorized executions
-        def filtered = frameworkService.filterAuthorizedProjectExecutionsAll(authContext,result,[AuthConstants.ACTION_READ])
 
-        withFormat{
-            xml{
-                return executionService.respondExecutionsXml(request,response,filtered,[total:total,offset:resOffset,max:resMax])
+        def results
+        try {
+            results = executionService.queryExecutions(query, resOffset, resMax)
+        }
+        catch (ExecutionQueryException e) {
+            return apiService.renderErrorFormat(
+                response,
+                [
+                    status: HttpServletResponse.SC_BAD_REQUEST,
+                    code  : 'api.error.parameter.error',
+                    args  : [message(code: e.getErrorMessageCode())]
+                ]
+            )
+        }
+
+        def result = results.result
+        def total = results.total
+        //filter query results to READ authorized executions
+        def filtered = frameworkService.filterAuthorizedProjectExecutionsAll(authContext, result, [AuthConstants.ACTION_READ])
+
+        withFormat {
+            xml {
+                return executionService.respondExecutionsXml(request, response, filtered, [total: total, offset: resOffset, max: resMax])
             }
-            json{
-                return executionService.respondExecutionsJson(request,response,filtered,[total:total,offset:resOffset,max:resMax])
+            json {
+                return executionService.respondExecutionsJson(request, response, filtered, [total: total, offset: resOffset, max: resMax])
             }
         }
+
+
     }
 
+
+    /**
+     *
+     * @return
+     */
+    def apiExecutionModeStatus() {
+
+        if (!apiService.requireVersion(request, response, ApiVersions.V32)) {
+            return
+        }
+
+        AuthContext authContext = frameworkService.getAuthContextForSubject(session.subject)
+        if (!frameworkService.authorizeApplicationResource(authContext, AuthConstants.RESOURCE_TYPE_SYSTEM,
+                AuthConstants.ACTION_READ)) {
+            return apiService.renderErrorFormat(response,
+                    [
+                            status: HttpServletResponse.SC_FORBIDDEN,
+                            code  : "api.error.item.unauthorized",
+                            args  : ["Read execution status", "Rundeck", '']
+                    ])
+        }
+
+        def executionStatus = configurationService.executionModeActive
+        int respStatus = executionStatus ? HttpServletResponse.SC_OK : HttpServletResponse.SC_SERVICE_UNAVAILABLE
+
+        withFormat {
+            json {
+                render(status: respStatus,  contentType: "application/json") {
+                    delegate.executionMode(executionStatus ? 'active' : 'passive')
+                }
+            }
+            xml {
+                render(status: respStatus, contentType: "application/xml") {
+                    delegate.'executions'(executionMode: executionStatus ? 'active' : 'passive')
+                }
+            }
+        }
+
+
+    }
 
     /**
      *
@@ -2239,4 +2377,174 @@ class ExecutionController extends ControllerBase{
                 [format: ['xml', 'json']]
         )
     }
+
+    /**
+     * API: /api/28/executions/metrics
+     */
+    def apiExecutionMetrics(ExecutionQuery query) {
+        if (!apiService.requireVersion(request, response, ApiVersions.V29)) {
+            return
+        }
+
+        if (query?.hasErrors()) {
+            return apiService.renderErrorFormat(response,
+                [
+                    status: HttpServletResponse.SC_BAD_REQUEST,
+                    code  : "api.error.parameter.error",
+                    args  : [query.errors.allErrors.collect { message(error: it) }.join("; ")]
+                ])
+        }
+
+        if(params.project) {
+            query.projFilter = params.project
+        }
+
+        if (null != query) {
+            query.configureFilter()
+
+            if (params.recentFilter && !query.recentFilter) {
+                //invald recentFilter input
+                return apiService.renderErrorFormat(
+                    response,
+                    [
+                        status: HttpServletResponse.SC_BAD_REQUEST,
+                        code  : 'api.error.history.date-relative-format',
+                        args  : ['recentFilter', params.recentFilter]
+                    ]
+                )
+            }
+        }
+
+        //attempt to parse/bind "end" and "begin" parameters
+        if (params.begin) {
+            try {
+                query.endafterFilter = ReportsController.parseDate(params.begin)
+                query.doendafterFilter = true
+            } catch (ParseException e) {
+                return apiService.renderErrorFormat(
+                    response,
+                    [
+                        status: HttpServletResponse.SC_BAD_REQUEST,
+                        code  : 'api.error.history.date-format',
+                        args  : ['begin', params.begin]
+                    ]
+                )
+            }
+        }
+
+        if (params.olderFilter) {
+            Date endDate = ExecutionQuery.parseRelativeDate(params.olderFilter)
+            if (null != endDate) {
+                query.endbeforeFilter = endDate
+                query.doendbeforeFilter = true
+            } else {
+                return apiService.renderErrorFormat(
+                    response,
+                    [
+                        status: HttpServletResponse.SC_BAD_REQUEST,
+                        code  : 'api.error.history.date-relative-format',
+                        args  : ['olderFilter', params.olderFilter]
+                    ]
+                )
+            }
+        } else if (params.end) {
+            try {
+                query.endbeforeFilter = ReportsController.parseDate(params.end)
+                query.doendbeforeFilter = true
+            } catch (ParseException e) {
+                return apiService.renderErrorFormat(
+                    response,
+                    [
+                        status: HttpServletResponse.SC_BAD_REQUEST,
+                        code  : 'api.error.history.date-format',
+                        args  : ['end', params.end]
+                    ]
+                )
+            }
+        }
+
+
+        def metrics
+        try {
+            // Get metric data
+            metrics = executionService.queryExecutionMetrics(query)
+        }
+        catch (ExecutionQueryException e) {
+            return apiService.renderErrorFormat(
+                response,
+                [
+                    status: HttpServletResponse.SC_BAD_REQUEST,
+                    code  : 'api.error.parameter.error',
+                    args  : [message(code: e.getErrorMessageCode())]
+                ]
+            )
+        }
+
+        // Format times to be human readable.
+        metricsOutputFormatTimeNumberAsString(metrics.duration, [
+            "average",
+            "min",
+            "max"
+        ])
+
+
+        withFormat {
+            json {
+                render metrics as JSON
+            }
+            xml {
+                render(contentType: "application/xml") {
+                    delegate.'result' {
+                        metrics.each { key, value ->
+                            if (value instanceof Map) {
+                                Map sub = value
+                                delegate."${key}" {
+                                    sub.each { k1, v1 ->
+                                        delegate."${k1}"(v1)
+                                    }
+                                }
+                            } else {
+                                delegate."${key}"(value)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+    }
+
+    /**
+     * On the supplied map, formats the specified keys as a time String.
+     * Map values must subclass java.lang.Number
+     */
+    static void metricsOutputFormatTimeNumberAsString(Map<Object, Number> map, List<String> keys) {
+        keys.each { k ->
+            if(map.containsKey(k)) {
+                map[k] = formatTimeNumberAsString(map[k])
+            }
+        }
+    }
+
+    /**
+     * Converts an interval of milliseconds into a readable string.
+     *
+     * @param time An interval of time in number of milliseconds.
+     * @return A readable string for the time interval specified. Eg: "5m"
+     */
+    static String formatTimeNumberAsString(Number time) {
+
+        def duration
+        if (time < 1000) {
+            duration = "0s"
+        } else if (time >= 1000 && time < 60000) {
+            duration = String.valueOf((time / 1000) as Integer) + "s"
+        } else {
+            duration = String.valueOf((time / 60000) as Integer) + "m"
+        }
+        return String.valueOf(duration)
+    }
+
+
 }

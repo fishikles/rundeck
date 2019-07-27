@@ -2,25 +2,25 @@ package rundeck.interceptors
 
 import com.dtolabs.rundeck.core.authentication.Group
 import com.dtolabs.rundeck.core.authentication.Username
+import grails.plugin.springsecurity.SpringSecurityUtils
 import org.rundeck.web.infosec.AuthorizationRoleSource
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.context.ApplicationContext
-import org.springframework.security.authentication.jaas.JaasAuthenticationToken
-import org.springframework.security.core.Authentication
 import org.springframework.security.core.context.SecurityContextHolder
 import rundeck.AuthToken
 import rundeck.User
+import rundeck.services.UserService
 
 import javax.security.auth.Subject
 import javax.servlet.ServletContext
 import javax.servlet.http.HttpServletRequest
-import java.security.AccessController
-
 
 class SetUserInterceptor {
     @Autowired
     ApplicationContext applicationContext
 
+    UserService userService
+    def messageSource
     int order = HIGHEST_PRECEDENCE + 30
 
     SetUserInterceptor() {
@@ -31,11 +31,12 @@ class SetUserInterceptor {
         //let them through, which is not desirable, so instead we do a manual match exclusion(see line 33)
 
     }
-
     boolean before() {
-        if(InterceptorHelper.matchesStaticAssets(controllerName)) return true
-        if(request.pathInfo == "/error") {
-            response.status = 200
+        if (InterceptorHelper.matchesStaticAssets(controllerName, request)) {
+            return true
+        }
+        if (request.pathInfo == "/error") {
+            //response.status = 200
             return true
         }
         if (request.api_version && request.remoteUser && !(grailsApplication.config.rundeck?.security?.apiCookieAccess?.enabled in ['true',true])){
@@ -81,13 +82,13 @@ class SetUserInterceptor {
                 session.subject=null
                 session.user=null
                 if(authtoken){
-                    request.invalidAuthToken = "Token:" + (authtoken.size()>5?authtoken.substring(0, 5):'') + "****"
+                    request.invalidAuthToken = "Token:" + AuthToken.printable(authtoken)
                 }
                 request.authenticatedToken = null
                 request.authenticatedUser = null
                 request.invalidApiAuthentication = true
                 if(authtoken){
-                    log.error("Invalid API token used: ${authtoken}");
+                    log.error("Invalid API token used: ${AuthToken.printable(authtoken)}");
                 }else{
                     log.error("Unauthenticated API request");
                 }
@@ -98,6 +99,18 @@ class SetUserInterceptor {
             request.errorCode = 'request.authentication.required'
             render view: '/common/error.gsp'
             return false
+        }
+        def requiredRole = grailsApplication.config.rundeck.security.requiredRole
+        if(!requiredRole.isEmpty()) {
+            if(!request?.subject?.principals?.findAll { it instanceof Group }?.any { it.name == requiredRole }) {
+                log.error("User ${request.remoteUser} must have role: ${requiredRole} to log in.")
+                SecurityContextHolder.clearContext()
+                request.logout()
+                response.status = 403
+                flash.loginerror = messageSource.getMessage("user.not.allowed",null,null)
+                render view: '/user/login.gsp'
+                return false
+            }
         }
         return true
     }
@@ -115,7 +128,7 @@ class SetUserInterceptor {
 
         //find AuthorizationRoleSource instances
         Map<String,AuthorizationRoleSource> type = applicationContext.getBeansOfType(AuthorizationRoleSource)
-        def roleset = new HashSet<String>()
+        def roleset = new HashSet<String>(userService.getUserGroupSourcePluginRoles(principal.name))
         type.each {name,AuthorizationRoleSource source->
             if(source.enabled) {
                 def roles = source.getUserRoles(principal.name, request)
@@ -130,6 +143,8 @@ class SetUserInterceptor {
             }
         }
         subject.principals.addAll(roleset.collect{new Group(it)})
+        def user = userService.findOrCreateUser(principal.name)
+        session.filterPref=UserService.parseKeyValuePref(user?.filterPref)
 
         subject
     }
@@ -146,21 +161,22 @@ class SetUserInterceptor {
         }
         if (context.getAttribute("TOKENS_FILE_PROPS")) {
             Properties tokens = (Properties) context.getAttribute("TOKENS_FILE_PROPS")
+            if(log.traceEnabled) log.trace("checking static tokens: ${tokens}")
             if (tokens[authtoken]) {
                 def userLine = tokens[authtoken]
                 def user = userLine.toString().split(",")[0]
-                log.debug("loginCheck found user ${user} via tokens file, token: ${authtoken}");
+                log.debug("loginCheck found user ${user} via tokens file, token: ${AuthToken.printable(authtoken)}");
                 return user
             }
         }
         def tokenobj = authtoken ? AuthToken.findByToken(authtoken) : null
         if (tokenobj) {
             if (tokenobj.tokenIsExpired()) {
-                log.debug("loginCheck token is expired ${tokenobj?.user}, token: ${tokenobj.uuid?:tokenobj.token}");
+                log.debug("loginCheck token is expired ${tokenobj?.user}, ${tokenobj}");
                 return null
             }
             User user = tokenobj?.user
-            log.debug("loginCheck found user ${user} via DB, token: ${tokenobj.uuid?:tokenobj.token}");
+            log.debug("loginCheck found user ${user.login} via DB, ${tokenobj}");
             return user.login
         }
         null
@@ -184,14 +200,14 @@ class SetUserInterceptor {
                 if(userLine.toString().split(",").length>1){
                     roles = userLine.toString().split(",").drop(1) as List
                 }
-                log.debug("loginCheck found roles ${roles} via tokens file, token: ${authtoken}");
+                log.debug("loginCheck found roles ${roles} via tokens file, token: ${AuthToken.printable(authtoken)}");
                 return roles
             }
         }
-        def tokenobj = authtoken ? AuthToken.findByToken(authtoken) : null
+        AuthToken tokenobj = authtoken ? AuthToken.findByToken(authtoken) : null
         if (tokenobj) {
             roles = tokenobj?.authRoles?.split(",") as List
-            log.debug("loginCheck found roles ${roles} via DB, token: ${authtoken}");
+            log.debug("loginCheck found roles ${roles} via DB, ${tokenobj}");
             return roles
         }
         null

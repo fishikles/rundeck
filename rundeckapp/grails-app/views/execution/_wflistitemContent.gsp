@@ -15,7 +15,7 @@
   --}%
 <%--
     _wflistitemContent.gsp
-    
+
     Author: Greg Schueler <a href="mailto:greg@dtosolutions.com">greg@dtosolutions.com</a>
     Created: Jul 27, 2010 3:53:40 PM
     $Id$
@@ -23,7 +23,7 @@
 
  --%>
 
-<g:set var="jobitem" value="${item.instanceOf(JobExec)|| (item instanceof java.util.Map && (item.jobName || item.uuid))}"/>
+<g:set var="jobitem" value="${item.instanceOf(JobExec)}"/>
 <div id="wfivis_${enc(attr:i)}" style="${i==highlight?'opacity: 0':''}">
     <div class="pflowitem wfctrlholder">
         <span class="pflow item " id="wfitem_${enc(attr:i)}" >
@@ -50,7 +50,7 @@
                 <g:if test="${!isErrorHandler}">
             <div class="btn-group">
 
-                <button type="button" class="btn btn-sm btn-default dropdown-toggle"
+                <button type="button" class="btn btn-xs btn-default dropdown-toggle"
                     ${item.errorHandler && jobitem ? 'disabled="disabled"':''}
                         data-toggle="dropdown"
                         aria-haspopup="true" aria-expanded="false">
@@ -80,20 +80,20 @@
                 </ul>
             </div>
             </g:if>
-            <span class="btn btn-sm btn-default "
+            <span class="btn btn-xs btn-default "
                   onclick="_doRemoveItem('${i}', '${stepNum}', ${isErrorHandler?true:false});"
                   title="${g.message(code:'Workflow.'+(isErrorHandler?'stepErrorHandler':'step')+'.action.delete.label')}">
                 <i class="glyphicon glyphicon-remove"></i></span>
 
 
             <g:unless test="${isErrorHandler}">
-                <span class="btn btn-sm btn-default wfitem_copy"  title="${message(code:"workflow.step.action.duplicate.title")}">
+                <span class="btn btn-xs btn-default wfitem_copy"  title="${message(code:"workflow.step.action.duplicate.title")}">
                     <g:icon name="duplicate"/>
                 </span>
             </g:unless>
         </div>
             <g:unless test="${isErrorHandler}">
-            <span class="btn btn-sm btn-simple dragHandle"  title="Drag to reorder"><g:icon name="resize-vertical"/></span>
+            <span class="btn btn-xs dragHandle"  title="Drag to reorder"><g:icon name="resize-vertical"/></span>
             </g:unless>
         </span>
 
@@ -143,30 +143,40 @@
                     <span class="text-primary"><g:message code="log.filters" /></span>
                 <!-- /ko -->
                 <!-- ko foreach: filters -->
-                <span class="btn btn-xs btn-info-hollow autohilite"
-                      data-bind="click: $root.editFilter" title="${message(code:"click.to.edit.filter")}">
-                    <!-- ko if: plugin() -->
-                    <!-- ko with: plugin() -->
-                    <!-- ko if: iconSrc -->
-                    <img width="16px" height="16px" data-bind="attr: {src: iconSrc}"/>
-                    <!-- /ko -->
-                    <!-- ko if: !iconSrc() -->
-                    <i class="rdicon icon-small plugin"></i>
-                    <!-- /ko -->
-                    <!-- /ko -->
-                    <!-- /ko -->
+                <div class="btn-group">
+                  <span class="btn btn-xs btn-info-hollow autohilite"
+                        data-bind="click: $root.editFilter" title="${message(code:"click.to.edit.filter")}">
+                      <!-- ko if: plugin() -->
+                      <!-- ko with: plugin() -->
+                      <!-- ko if: iconSrc -->
+                      <img width="16px" height="16px" data-bind="attr: {src: iconSrc}"/>
+                      <!-- /ko -->
+                      <!-- ko if: glyphicon -->
+                      <i data-bind="css: 'glyphicon glyphicon-'+glyphicon()"></i>
+                      <!-- /ko -->
+                      <!-- ko if: faicon -->
+                      <i data-bind="css: 'fas fa-'+faicon()"></i>
+                      <!-- /ko -->
+                      <!-- ko if: fabicon -->
+                      <i data-bind="css: 'fab fa-'+fabicon()"></i>
+                      <!-- /ko -->
+                      <!-- ko if: !iconSrc() && !glyphicon() && !faicon() && !fabicon() -->
+                      <i class="rdicon icon-small plugin"></i>
+                      <!-- /ko -->
+                      <!-- /ko -->
+                      <!-- /ko -->
 
 
-                    <span data-bind="text: title"></span>
-                </span>
-                <span class="textbtn textbtn-danger textbtn-deemphasize"
-                      data-bind="click: $root.removeFilter"
-                      title="${message(code:"remove.filter")}"
-                ><g:icon name="remove"/></span>
-
+                      <span data-bind="text: title"></span>
+                  </span>
+                  <span class="btn btn-danger btn-xs"
+                        data-bind="click: $root.removeFilter"
+                        title="${message(code:"remove.filter")}"
+                  ><g:icon name="remove"/></span>
+                </div>
                 <!-- /ko -->
                 <!-- ko if: filters().length -->
-                    <span class="textbtn textbtn-success" data-bind="click: addFilterPopup">
+                    <span class="btn btn-default btn-xs" data-bind="click: addFilterPopup">
                       <g:icon name="plus"/>
                       <g:message code="add" />
                     </span>

@@ -77,7 +77,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
     ConfigurationService configurationService
     def grailsApplication
     def metricService
-    def nodeService
+    def rundeckNodeService
     /**
      * Scheduled executor for retries
      */
@@ -306,7 +306,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
     List<String> listProjectDirPaths(String projectName, String path, String pattern=null) {
         def prefix = 'projects/' + projectName
         def storagePath = prefix + (path.startsWith("/")?path:"/${path}")
-        def resources = getStorage().listDirectory(storagePath)
+        def resources = getStorage().hasDirectory(storagePath)?getStorage().listDirectory(storagePath):[]
         def outprefix=path.endsWith('/')?path.substring(0,path.length()-1):path
         resources.collect{Resource<ResourceMeta> res->
             def pathName=res.path.name + (res.isDirectory()?'/':'')
@@ -443,7 +443,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
         def resource = writeProjectFileResource(projectName, storagePath, bais, metadata)
 
         projectCache.invalidate(projectName)
-        nodeService.expireProjectNodes(projectName)
+        rundeckNodeService.refreshProjectNodes(projectName)
         return [
                 config      : properties,
                 lastModified: resource.contents.modificationTime,
@@ -456,7 +456,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
             log.error("Failed to delete all associated resources for project ${projectName}")
         }
         projectCache.invalidate(projectName)
-        nodeService.expireProjectNodes(projectName)
+        rundeckNodeService.refreshProjectNodes(projectName)
     }
 
     private IPropertyLookup createProjectPropertyLookup(String projectName, Properties config) {
@@ -478,16 +478,39 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
         create.expand()
         return create
     }
+    public static final Map<String, String> DEFAULT_PROJ_PROPS = Collections.unmodifiableMap(
+        [
+            'resources.source.1.type'              : 'local',
+            'service.NodeExecutor.default.provider': 'jsch-ssh',
+            'service.FileCopier.default.provider'  : 'jsch-scp',
+            'project.ssh-keypath'                  :
+                new File(System.getProperty("user.home"), ".ssh/id_rsa").getAbsolutePath(),
+            'project.ssh-authentication'           : 'privateKey'
+        ]
+    )
 
     @Override
     IRundeckProject createFrameworkProject(final String projectName, final Properties properties) {
         Project found = Project.findByName(projectName)
         def description = properties.get('project.description')
+        boolean generateInitProps = false
         if (!found) {
             def project = new Project(name: projectName, description: description)
             project.save(failOnError: true)
+            generateInitProps = true
         }
-        def res = storeProjectConfig(projectName, properties)
+        Properties storedProps = new Properties()
+        storedProps.putAll(properties)
+        if (generateInitProps) {
+            Properties newProps = new Properties()
+            DEFAULT_PROJ_PROPS.each { k, v ->
+                if (null == properties || !properties.containsKey(k)) {
+                    newProps.setProperty(k, v);
+                }
+            }
+            storedProps.putAll(newProps)
+        }
+        def res = storeProjectConfig(projectName, storedProps)
         def rdprojectconfig = new RundeckProjectConfig(projectName,
                                                        createProjectPropertyLookup(projectName, res.config ?: new Properties()),
                                                        createDirectProjectPropertyLookup(projectName, res.config ?: new Properties()),
@@ -500,7 +523,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
                 projectService: this,
                 description: description? description: null
         )
-        newproj.nodesFactory = nodeService
+        newproj.nodesFactory = rundeckNodeService
         return newproj
     }
 
@@ -546,7 +569,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
                                                        resource.lastModified
         )
         project.projectConfig=rdprojectconfig
-        project.nodesFactory = nodeService
+        project.nodesFactory = rundeckNodeService
     }
 
     Map mergeProjectProperties(
@@ -560,7 +583,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
             throw new IllegalArgumentException("project does not exist: " + projectName)
         }
         def res = loadProjectConfigResource(projectName)
-        def oldprops = res.config
+        Properties oldprops = res?.config?:new Properties()
         Properties newprops = mergeProperties(removePrefixes, oldprops, properties)
         Map newres=storeProjectConfig(projectName, newprops)
         newres
@@ -596,7 +619,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
                                                        resource.lastModified
         )
         project.projectConfig=rdprojectconfig
-        project.nodesFactory = nodeService
+        project.nodesFactory = rundeckNodeService
     }
     Map setProjectProperties(final String projectName, final Properties properties) {
         def description = properties['project.description']
@@ -707,7 +730,7 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
                 projectService: this,
                 description: description? description : null
         )
-        rdproject.nodesFactory = nodeService
+        rdproject.nodesFactory = rundeckNodeService
         log.info("Loaded project ${project} in ${System.currentTimeMillis()-start}ms")
         return rdproject
     }
@@ -733,13 +756,6 @@ class ProjectManagerService implements ProjectManager, ApplicationContextAware, 
                         }
                     }
             );
-
-    /**
-     * @return specific nodes resources file path for the project, based on the framework.nodes.file.name property
-     */
-    public String getNodesResourceFilePath(IRundeckProject project) {
-        ProjectNodeSupport.getNodesResourceFilePath(project, frameworkService.getRundeckFramework())
-    }
 
     /**
      * Import any projects that do not exist from the source

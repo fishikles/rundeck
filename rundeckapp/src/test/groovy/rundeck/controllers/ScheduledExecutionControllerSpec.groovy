@@ -23,6 +23,8 @@ import com.dtolabs.rundeck.core.common.Framework
 import com.dtolabs.rundeck.core.common.NodeEntryImpl
 import com.dtolabs.rundeck.core.common.NodeSetImpl
 import com.dtolabs.rundeck.core.common.NodesSelector
+import com.dtolabs.rundeck.core.utils.NodeSet
+import com.dtolabs.rundeck.core.utils.OptsUtil
 import grails.test.mixin.Mock
 import grails.test.mixin.TestFor
 import org.grails.plugins.codecs.URLCodec
@@ -40,7 +42,7 @@ import javax.security.auth.Subject
  * Created by greg on 7/14/15.
  */
 @TestFor(ScheduledExecutionController)
-@Mock([ScheduledExecution, Option, Workflow, CommandExec, Execution, JobExec, ReferencedExecution])
+@Mock([ScheduledExecution, Option, Workflow, CommandExec, Execution, JobExec, ReferencedExecution, ScheduledExecutionStats])
 class ScheduledExecutionControllerSpec extends Specification {
     def setup() {
         mockCodec(URIComponentCodec)
@@ -84,38 +86,6 @@ class ScheduledExecutionControllerSpec extends Specification {
         readauth | _
         true     | _
         false    | _
-
-    }
-
-    def "expandUrl with project globals"() {
-        given:
-        Option option = new Option()
-        ScheduledExecution job = new ScheduledExecution(createJobParams())
-        def optsmap = [:]
-        def ishttp = true
-        controller.frameworkService = Mock(FrameworkService)
-
-
-        when:
-        def result = controller.expandUrl(option, url, job, optsmap, ishttp)
-
-        then:
-        expected == result
-        1 * controller.frameworkService.getFrameworkNodeName() >> 'anode'
-        1 * controller.frameworkService.getProjectGlobals('AProject') >> globals
-        1 * controller.frameworkService.getServerUUID()
-        0 * controller.frameworkService._(*_)
-
-
-        where:
-        url                                             | globals                           | expected
-        ''                                              | [:]                               | ''
-        'http://${globals.host}/a/path'                 | [host: 'myhost.com']              | 'http://myhost.com/a/path'
-        'http://${globals.host}/a/path/${globals.path}' | [host: 'myhost.com', path: 'x y'] |
-                'http://myhost.com/a/path/x%20y'
-        'http://${globals.host}/a/path?q=${globals.q}'  | [host: 'myhost.com', q: 'a b']    |
-                'http://myhost.com/a/path?q=a+b'
-
 
     }
 
@@ -396,7 +366,7 @@ class ScheduledExecutionControllerSpec extends Specification {
     }
 
     @Unroll
-    def "api scheduler takeover XML input"(String requestXml, String requestUUID, boolean allserver, String project, String jobid){
+    def "api scheduler takeover XML input"(String requestXml, String requestUUID, boolean allserver, String project, String[] jobid, int api_version){
         given:
         controller.apiService=Mock(ApiService){
             1 * requireVersion(_,_,14) >> true
@@ -415,6 +385,7 @@ class ScheduledExecutionControllerSpec extends Specification {
         when:
         request.method='PUT'
         request.XML=requestXml
+        request.api_version = api_version
         response.format='xml'
         def result=controller.apiJobClusterTakeoverSchedule()
 
@@ -422,14 +393,16 @@ class ScheduledExecutionControllerSpec extends Specification {
         response.status==200
 
         where:
-        requestXml                                                                                              | requestUUID | allserver | project | jobid
-        "<server uuid='${TEST_UUID1}' />".toString()                                                            | TEST_UUID1  | false     | null    | null
-        "<server all='true' />".toString()                                                                      | null        | true      | null    | null
-        "<takeoverSchedule><server uuid='${TEST_UUID1}' /></takeoverSchedule>".toString()                       | TEST_UUID1  | false     | null    | null
-        "<takeoverSchedule><server all='true' /></takeoverSchedule>".toString()                                 | null        | true      | null    | null
-        '<takeoverSchedule><server all="true" /><project name="asdf"/></takeoverSchedule>'                      | null        | true      | 'asdf'  | null
-        '<takeoverSchedule><server all="true" /><job id="ajobid"/></takeoverSchedule>'                          | null        | true      | null    | 'ajobid'
-        "<takeoverSchedule><server uuid='${TEST_UUID1}' /><project name='asdf'/></takeoverSchedule>".toString() | TEST_UUID1  | false     | 'asdf'  | null
+        requestXml                                                                                              | requestUUID | allserver | project | jobid             | api_version
+        "<server uuid='${TEST_UUID1}' />".toString()                                                            | TEST_UUID1  | false     | null    | null              | 17
+        "<server all='true' />".toString()                                                                      | null        | true      | null    | null              | 17
+        "<takeoverSchedule><server uuid='${TEST_UUID1}' /></takeoverSchedule>".toString()                       | TEST_UUID1  | false     | null    | null              | 17
+        "<takeoverSchedule><server all='true' /></takeoverSchedule>".toString()                                 | null        | true      | null    | null              | 17
+        '<takeoverSchedule><server all="true" /><project name="asdf"/></takeoverSchedule>'                      | null        | true      | 'asdf'  | null              | 17
+        '<takeoverSchedule><server all="true" /><job id="ajobid"/></takeoverSchedule>'                          | null        | true      | null    | ['ajobid']          | 17
+        "<takeoverSchedule><server uuid='${TEST_UUID1}' /><project name='asdf'/></takeoverSchedule>".toString() | TEST_UUID1  | false     | 'asdf'  | null              | 17
+        '<takeoverSchedule><server all="true" /><job id="ajobid"/><job id="ajobidb"/></takeoverSchedule>'       | null        | true      | null    | ['ajobid','ajobidb']  | 32
+
     }
 
 
@@ -751,25 +724,35 @@ class ScheduledExecutionControllerSpec extends Specification {
         setupFormTokens(params)
         when:
         request.method = 'POST'
+        params.project='testproject'
         params.followdetail = follow
         controller.runJobInline(command, extra)
 
         then:
         response.status == 200
         response.contentType.contains 'application/json'
-        response.json == [
-                href   : "/execution/follow/${exec.id}#"+follow,
-                success: true,
-                id     : exec.id,
-                follow : false
-        ]
+        if(follow != 'html'){
+            response.json == [
+                    href   : "/execution/follow/${exec.id}#"+follow,
+                    success: true,
+                    id     : exec.id,
+                    follow : false
+            ]
+        }else{
+            response.json == [
+                    href : "/project/${params.project}/execution/renderOutput/${exec.id}?convertContent=on&loglevels=on&ansicolor=on&reload=true",
+                    success: true,
+                    id     : exec.id,
+                    follow : false
+            ]
+        }
 
         where:
         follow      |_
         'output'    |_
         'summary'   |_
         'monitor'   |_
-        'definition'|_
+        'html'      |_
 
     }
 
@@ -894,24 +877,35 @@ class ScheduledExecutionControllerSpec extends Specification {
         params.runAtTime = 'dummy'
         when:
         request.method = 'POST'
+        params.project='testproject'
         params.followdetail = follow
         controller.scheduleJobInline(command, extra)
 
         then:
         response.status == 200
         response.contentType.contains 'application/json'
-        response.json == [
-                href   : "/execution/follow/${exec.id}#"+follow,
-                success: true,
-                id     : exec.id,
-                follow : false
-        ]
+        if(follow != 'html') {
+            response.json == [
+                    href   : "/execution/follow/${exec.id}#" + follow,
+                    success: true,
+                    id     : exec.id,
+                    follow : false
+            ]
+        } else {
+            response.json == [
+                    href   : "/project/${params.project}/execution/renderOutput/${exec.id}?convertContent=on&loglevels=on&ansicolor=on&reload=true",
+                    success: true,
+                    id     : exec.id,
+                    follow : false
+            ]
+        }
+
         where:
         follow      |_
         'output'    |_
         'summary'   |_
         'monitor'   |_
-        'definition'|_
+        'html'      |_
     }
     def "run job later at time"() {
         given:
@@ -1705,5 +1699,311 @@ class ScheduledExecutionControllerSpec extends Specification {
         ) >> [success: true]
         1 * controller.executionService.respondExecutionsXml(_, _, _)
         0 * controller.executionService._(*_)
+    }
+
+    def "isReference deleted parent"(){
+        given:
+        def refTotal = 10
+        def se = new ScheduledExecution(
+                uuid: jobuuid,
+                jobName: 'test1',
+                project: 'project1',
+                groupPath: 'testgroup',
+                doNodedispatch: true,
+                filter:'name: ${option.nodes}',
+                refExecCount: refTotal,
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [
+                                new CommandExec([
+                                        adhocRemoteString: 'test buddy',
+                                        argString: '-delay 12 -monkey cheese -particle'
+                                ])
+                        ]
+                )
+        ).save()
+        def seb = new ScheduledExecution(
+                jobName: 'test2',
+                project: 'project1',
+                groupPath: 'testgroup',
+                doNodedispatch: true,
+                filter:'name: ${option.nodes}',
+                refExecCount: refTotal,
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [
+                                new CommandExec([
+                                        adhocRemoteString: 'test buddy',
+                                        argString: '-delay 12 -monkey cheese -particle'
+                                ])
+                        ]
+                )
+        ).save()
+        def exec = new Execution(
+                user: "testuser",
+                project: "project1",
+                loglevel: 'WARN',
+                status: 'FAILED',
+                doNodedispatch: true,
+                filter:'name: nodea',
+                succeededNodeList:'fwnode',
+                failedNodeList: 'nodec xyz,nodea',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: 'a remote string')]).save(),
+                scheduledExecution: null
+        ).save()
+
+        //if(expected){
+            def re = new ReferencedExecution(scheduledExecution: se,execution: exec).save()
+        //}
+
+
+
+        NodeSetImpl testNodeSet = new NodeSetImpl()
+        testNodeSet.putNode(new NodeEntryImpl("nodea"))
+        testNodeSet.putNode(new NodeEntryImpl("nodeb"))
+        testNodeSet.putNode(new NodeEntryImpl("nodec xyz"))
+        NodeSetImpl testNodeSetB = new NodeSetImpl()
+        testNodeSetB.putNode(new NodeEntryImpl("nodea"))
+        testNodeSetB.putNode(new NodeEntryImpl("nodec xyz"))
+
+        controller.frameworkService=Mock(FrameworkService){
+            authorizeProjectJobAny(_,_,_,_)>>true
+            filterAuthorizedNodes(_,_,_,_)>>{args-> args[2]}
+            filterNodeSet(_,_)>>testNodeSetB
+            getRundeckFramework()>>Mock(Framework){
+                getFrameworkNodeName()>>'fwnode'
+            }
+        }
+        controller.scheduledExecutionService=Mock(ScheduledExecutionService){
+            getByIDorUUID(_)>>se
+        }
+        controller.notificationService=Mock(NotificationService)
+        controller.orchestratorPluginService=Mock(OrchestratorPluginService)
+        controller.pluginService = Mock(PluginService)
+        when:
+        request.parameters = [id: se.id.toString(),project:'project1',retryFailedExecId:exec.id.toString()]
+
+        def model = controller.show()
+        then:
+        response.redirectedUrl==null
+        model != null
+        model.isReferenced==false
+
+        where:
+        jobuuid     | expected
+        '000000'    | false
+        '111111'    | false
+
+    }
+
+    def "unselect nodes from exclude filter"(){
+        given:
+        def se = new ScheduledExecution(
+                uuid: 'testUUID',
+                jobName: 'test1',
+                project: 'project1',
+                groupPath: 'testgroup',
+                doNodedispatch: true,
+                filter:'tags: running',
+                filterExclude:'name: nodea',
+                excludeFilterUncheck: true,
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [
+                                new CommandExec([
+                                        adhocRemoteString: 'test buddy',
+                                        argString: '-delay 12 -monkey cheese -particle'
+                                ])
+                        ]
+                )
+        ).save()
+
+        NodeSetImpl testNodeSet = new NodeSetImpl()
+        testNodeSet.putNode(new NodeEntryImpl("nodea"))
+        testNodeSet.putNode(new NodeEntryImpl("nodeb"))
+        testNodeSet.putNode(new NodeEntryImpl("nodec xyz"))
+
+        NodeSetImpl testNodeSetB = new NodeSetImpl()
+        testNodeSetB.putNode(new NodeEntryImpl("nodea"))
+
+        NodeSetImpl expected = new NodeSetImpl()
+        expected.putNode(new NodeEntryImpl("nodeb"))
+        expected.putNode(new NodeEntryImpl("nodec xyz"))
+
+        NodeSet nset = ExecutionService.filtersAsNodeSet(se)
+        NodeSet unselectedNset = ExecutionService.filtersExcludeAsNodeSet(se)
+
+        controller.frameworkService=Mock(FrameworkService){
+            authorizeProjectJobAny(_,_,_,_)>>true
+            filterAuthorizedNodes(_,_,_,_)>>{args-> args[2]}
+            filterNodeSet(nset,_)>>testNodeSet
+            filterNodeSet(unselectedNset,_)>>testNodeSetB
+            getRundeckFramework()>>Mock(Framework){
+                getFrameworkNodeName()>>'fwnode'
+            }
+        }
+        controller.scheduledExecutionService=Mock(ScheduledExecutionService){
+            getByIDorUUID(_)>>se
+        }
+        controller.notificationService=Mock(NotificationService)
+        controller.orchestratorPluginService=Mock(OrchestratorPluginService)
+        controller.pluginService = Mock(PluginService)
+        when:
+        request.parameters = [id: se.id.toString(),project:'project1']
+
+        def model = controller.show()
+
+        then:
+        model != null
+        model.scheduledExecution != null
+        null != model.selectedNodes
+        expected.nodes*.nodename == model.selectedNodes
+
+    }
+
+    def "show job retry failed exec id empty filter"(){
+        given:
+
+        def se = new ScheduledExecution(
+                uuid: 'testUUID',
+                jobName: 'test1',
+                project: 'project1',
+                groupPath: 'testgroup',
+                doNodedispatch: true,
+                nodeFilterEditable: true,
+                filter:'',
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [
+                                new CommandExec([
+                                        adhocRemoteString: 'test buddy',
+                                        argString: '-delay 12 -monkey cheese -particle'
+                                ])
+                        ]
+                )
+        ).save()
+        def exec = new Execution(
+                user: "testuser",
+                project: "project1",
+                loglevel: 'WARN',
+                status: 'FAILED',
+                doNodedispatch: true,
+                filter:'name: nodea',
+                succeededNodeList:'fwnode',
+                failedNodeList: 'nodec xyz,nodea',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: 'a remote string')]).save(),
+                scheduledExecution: se
+        ).save()
+
+
+        NodeSetImpl testNodeSetEmpty = new NodeSetImpl()
+        NodeSetImpl testNodeSetFailed = new NodeSetImpl()
+        testNodeSetFailed.putNode(new NodeEntryImpl("nodea"))
+        testNodeSetFailed.putNode(new NodeEntryImpl("nodec xyz"))
+
+        def failedSet = ExecutionService.filtersAsNodeSet([filter: OptsUtil.join("name:", exec.failedNodeList)])
+        def nset = ExecutionService.filtersAsNodeSet(se)
+
+        controller.frameworkService=Mock(FrameworkService){
+            authorizeProjectJobAny(_,_,_,_)>>true
+            filterAuthorizedNodes(_,_,_,_)>>{args-> args[2]}
+            filterNodeSet(nset,_)>>testNodeSetEmpty
+            filterNodeSet(failedSet,_)>>testNodeSetFailed
+            getRundeckFramework()>>Mock(Framework){
+                getFrameworkNodeName()>>'fwnode'
+            }
+        }
+        controller.scheduledExecutionService=Mock(ScheduledExecutionService){
+            getByIDorUUID(_)>>se
+        }
+        controller.notificationService=Mock(NotificationService)
+        controller.orchestratorPluginService=Mock(OrchestratorPluginService)
+        controller.pluginService = Mock(PluginService)
+        when:
+        request.parameters = [id: se.id.toString(),project:'project1',retryFailedExecId:exec.id.toString()]
+
+        def model = controller.show()
+        then:
+        model != null
+        model.scheduledExecution != null
+        '' == model.nodefilter
+        false == model.nodesetvariables
+        'nodec xyz,nodea' == model.failedNodes
+        testNodeSetFailed.nodes.size() == model.nodes.size()
+    }
+
+    def "show job retry failed exec id when overwrite the filter"() {
+        given:
+
+        def se = new ScheduledExecution(
+                uuid: 'testUUID',
+                jobName: 'test1',
+                project: 'project1',
+                groupPath: 'testgroup',
+                doNodedispatch: true,
+                nodeFilterEditable: true,
+                filter: '.*',
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [
+                                new CommandExec([
+                                        adhocRemoteString: 'test buddy',
+                                        argString        : '-delay 12 -monkey cheese -particle'
+                                ])
+                        ]
+                )
+        ).save()
+        def exec = new Execution(
+                user: "testuser",
+                project: "project1",
+                loglevel: 'WARN',
+                status: 'FAILED',
+                doNodedispatch: true,
+                filter: 'name: nodea',
+                succeededNodeList: 'fwnode',
+                failedNodeList: 'nodec xyz,nodea',
+                workflow: new Workflow(commands: [new CommandExec(adhocExecution: true, adhocRemoteString: 'a remote string')]).save(),
+                scheduledExecution: se
+        ).save()
+
+
+        NodeSetImpl testNodeSetFilter = new NodeSetImpl()
+        testNodeSetFilter.putNode(new NodeEntryImpl("node1"))
+        testNodeSetFilter.putNode(new NodeEntryImpl("node2"))
+        testNodeSetFilter.putNode(new NodeEntryImpl("node3"))
+        testNodeSetFilter.putNode(new NodeEntryImpl("node4"))
+
+        NodeSetImpl testNodeSetFailed = new NodeSetImpl()
+        testNodeSetFailed.putNode(new NodeEntryImpl("nodea"))
+        testNodeSetFailed.putNode(new NodeEntryImpl("nodec xyz"))
+
+        def failedSet = ExecutionService.filtersAsNodeSet([filter: OptsUtil.join("name:", exec.failedNodeList)])
+        def nset = ExecutionService.filtersAsNodeSet(se)
+
+        controller.frameworkService = Mock(FrameworkService) {
+            authorizeProjectJobAny(_, _, _, _) >> true
+            filterAuthorizedNodes(_, _, _, _) >> { args -> args[2] }
+            filterNodeSet(nset, _) >> testNodeSetFilter
+            filterNodeSet(failedSet, _) >> testNodeSetFailed
+            getRundeckFramework() >> Mock(Framework) {
+                getFrameworkNodeName() >> 'fwnode'
+            }
+        }
+        controller.scheduledExecutionService = Mock(ScheduledExecutionService) {
+            getByIDorUUID(_) >> se
+        }
+        controller.notificationService = Mock(NotificationService)
+        controller.orchestratorPluginService = Mock(OrchestratorPluginService)
+        controller.pluginService = Mock(PluginService)
+        when:
+        request.parameters = [id: se.id.toString(), project: 'project1', retryFailedExecId: exec.id.toString()]
+
+        def model = controller.show()
+        then:
+        model != null
+        model.scheduledExecution != null
+        false == model.nodesetvariables
+        'nodec xyz,nodea' == model.failedNodes
+        model.nodes.size() == testNodeSetFailed.nodes.size() + testNodeSetFilter.nodes.size()
     }
 }

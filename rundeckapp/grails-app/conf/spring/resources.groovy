@@ -20,6 +20,7 @@ import com.dtolabs.rundeck.app.internal.framework.FrameworkPropertyLookupFactory
 import com.dtolabs.rundeck.app.internal.framework.RundeckFrameworkFactory
 import com.dtolabs.rundeck.core.Constants
 import com.dtolabs.rundeck.core.authorization.AuthorizationFactory
+import com.dtolabs.rundeck.core.cluster.ClusterInfoService
 import com.dtolabs.rundeck.core.common.FrameworkFactory
 import com.dtolabs.rundeck.core.common.NodeSupport
 import com.dtolabs.rundeck.core.plugins.FilePluginCache
@@ -43,12 +44,20 @@ import com.dtolabs.rundeck.server.plugins.logs.*
 import com.dtolabs.rundeck.server.plugins.logstorage.TreeExecutionFileStoragePluginFactory
 import com.dtolabs.rundeck.server.plugins.services.*
 import com.dtolabs.rundeck.server.plugins.storage.DbStoragePluginFactory
-import com.dtolabs.rundeck.server.storage.StorageTreeFactory
-import grails.plugin.springsecurity.SecurityFilterPosition
+import com.dtolabs.rundeck.core.storage.StorageTreeFactory
 import grails.plugin.springsecurity.SpringSecurityUtils
-import grails.util.Environment
 import groovy.io.FileType
-
+import org.grails.spring.beans.factory.InstanceFactoryBean
+import org.rundeck.app.api.ApiInfo
+import org.rundeck.app.authorization.RundeckAuthContextEvaluator
+import org.rundeck.app.authorization.RundeckAuthorizedServicesProvider
+import org.rundeck.app.cluster.ClusterInfo
+import org.rundeck.app.services.EnhancedNodeService
+import org.rundeck.app.spi.RundeckSpiBaseServicesProvider
+import org.rundeck.security.JettyCompatibleSpringSecurityPasswordEncoder
+import org.rundeck.security.RundeckJaasAuthenticationProvider
+import org.rundeck.security.RundeckAuthSuccessEventListener
+import org.rundeck.security.RundeckJaasAuthenticationSuccessEventListener
 import org.rundeck.security.RundeckJaasAuthorityGranter
 import org.rundeck.security.RundeckPreauthenticationRequestHeaderFilter
 import org.rundeck.security.RundeckUserDetailsService
@@ -61,16 +70,25 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean
 import org.springframework.core.task.SimpleAsyncTaskExecutor
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler
-import org.springframework.security.authentication.AuthenticationManager
 import org.springframework.security.authentication.jaas.DefaultJaasAuthenticationProvider
-import org.springframework.security.core.userdetails.UserDetailsService
+import org.springframework.security.core.session.SessionRegistryImpl
 import org.springframework.security.provisioning.InMemoryUserDetailsManager
+import org.springframework.security.web.authentication.logout.CookieClearingLogoutHandler
 import org.springframework.security.web.authentication.preauth.PreAuthenticatedAuthenticationProvider
+import org.springframework.security.web.authentication.session.CompositeSessionAuthenticationStrategy
+import org.springframework.security.web.authentication.session.ConcurrentSessionControlAuthenticationStrategy
+import org.springframework.security.web.authentication.session.RegisterSessionAuthenticationStrategy
+import org.springframework.security.web.authentication.session.SessionFixationProtectionStrategy
 import org.springframework.security.web.jaasapi.JaasApiIntegrationFilter
+import org.springframework.security.web.session.ConcurrentSessionFilter
+import rundeck.services.DirectNodeExecutionService
+import rundeck.services.FrameworkService
 import rundeck.services.PasswordFieldsService
 import rundeck.services.QuartzJobScheduleManager
 import rundeck.services.scm.ScmJobImporter
-
+import rundeckapp.init.ExternalStaticResourceConfigurer
+import rundeckapp.init.servlet.JettyServletContainerCustomizer
+import rundeckapp.init.RundeckExtendedMessageBundle
 import javax.security.auth.login.Configuration
 
 beans={
@@ -103,6 +121,13 @@ beans={
         return
     }
 
+    rundeckI18nEnhancer(RundeckExtendedMessageBundle, ref("messageSource"),"file:${rdeckBase}/i18n/messages".toString())
+
+    if(application.config.rundeck.gui.staticUserResources.enabled in ['true',true]) {
+        externalStaticResourceConfigurer(ExternalStaticResourceConfigurer) {
+            resourceUriLocation = application.config.rundeck.gui.staticUserResources.filesystemLocation.isEmpty() ? "file:${rdeckBase}/user-assets/" : application.config.rundeck.gui.staticUserResources.filesystemLocation
+        }
+    }
 
     def cfgRundeckLogDir = application.config.rundeck?.log?.dir
     if(cfgRundeckLogDir) { System.setProperty("rundeck.log.dir", cfgRundeckLogDir )}
@@ -123,6 +148,8 @@ beans={
     rundeckNodeSupport(NodeSupport){
 
     }
+    
+    rundeckNodeService(EnhancedNodeService)
 
     frameworkPropertyLookupFactory(FrameworkPropertyLookupFactory){
         baseDir=rdeckBase
@@ -134,7 +161,7 @@ beans={
     frameworkFilesystem(FrameworkFactory,rdeckBase){ bean->
         bean.factoryMethod='createFilesystemFramework'
     }
-    filesystemProjectManager(FrameworkFactory,frameworkFilesystem,ref('nodeService')){ bean->
+    filesystemProjectManager(FrameworkFactory,frameworkFilesystem,ref('rundeckNodeService')){ bean->
         bean.factoryMethod='createProjectManager'
     }
 
@@ -149,6 +176,26 @@ beans={
 
     rundeckFramework(frameworkFactory:'createFramework'){
     }
+
+    clusterInfoService(ClusterInfo) {
+        clusterInfoServiceDelegate = ref('frameworkService')
+    }
+    rundeckApiInfoService(ApiInfo)
+
+    rundeckSpiBaseServicesProvider(RundeckSpiBaseServicesProvider) {
+        services = [
+                (ClusterInfoService): ref('clusterInfoService'),
+                (ApiInfo)           : ref('rundeckApiInfoService')
+        ]
+    }
+
+    directNodeExecutionService(DirectNodeExecutionService)
+
+    rundeckAuthorizedServicesProvider(RundeckAuthorizedServicesProvider) {
+        baseServices = ref('rundeckSpiBaseServicesProvider')
+    }
+
+    rundeckAuthContextEvaluator(RundeckAuthContextEvaluator)
 
     def configDir = new File(Constants.getFrameworkConfigDir(rdeckBase))
 
@@ -273,8 +320,8 @@ beans={
     }
 
     def storageDir= new File(varDir, 'storage')
-    rundeckStorageTree(StorageTreeFactory){
-        rundeckFramework=ref('rundeckFramework')
+    rundeckStorageTreeFactory(StorageTreeFactory){
+        frameworkPropertyLookup=ref('frameworkPropertyLookup')
         pluginRegistry=ref("rundeckPluginRegistry")
         storagePluginProviderService=ref('storagePluginProviderService')
         storageConverterPluginProviderService=ref('storageConverterPluginProviderService')
@@ -286,9 +333,10 @@ beans={
         defaultConverters=['StorageTimestamperConverter','KeyStorageLayer']
         loggerName='org.rundeck.storage.events'
     }
+    rundeckStorageTree(rundeckStorageTreeFactory:"createTree")
     authRundeckStorageTree(AuthRundeckStorageTree, rundeckStorageTree)
 
-    rundeckConfigStorageTree(StorageTreeFactory){
+    rundeckConfigStorageTreeFactory(StorageTreeFactory){
         frameworkPropertyLookup=ref('frameworkPropertyLookup')
         pluginRegistry=ref("rundeckPluginRegistry")
         storagePluginProviderService=ref('storagePluginProviderService')
@@ -301,6 +349,8 @@ beans={
         defaultConverters=['StorageTimestamperConverter']
         loggerName='org.rundeck.config.storage.events'
     }
+    rundeckConfigStorageTree(rundeckConfigStorageTreeFactory:"createTree")
+
     /**
      * Define groovy-based plugins as Spring beans, registered in a hash map
      */
@@ -376,8 +426,10 @@ beans={
     /**
      * Track passwords on these plugins
      */
+    obscurePasswordFieldsService(PasswordFieldsService)
     resourcesPasswordFieldsService(PasswordFieldsService)
     execPasswordFieldsService(PasswordFieldsService)
+    pluginsPasswordFieldsService(PasswordFieldsService)
     fcopyPasswordFieldsService(PasswordFieldsService)
 
 
@@ -386,7 +438,38 @@ beans={
     apiMarshallerRegistrar(ApiMarshallerRegistrar)
 
     rundeckUserDetailsService(RundeckUserDetailsService)
-    rundeckJaasAuthorityGranter(RundeckJaasAuthorityGranter)
+    rundeckJaasAuthorityGranter(RundeckJaasAuthorityGranter){
+        rolePrefix=grailsApplication.config.rundeck.security.jaasRolePrefix?.toString()?:''
+    }
+
+    if(!grailsApplication.config.rundeck.logout.expire.cookies.isEmpty()) {
+        cookieClearingLogoutHandler(CookieClearingLogoutHandler,grailsApplication.config.rundeck.logout.expire.cookies.split(","))
+        SpringSecurityUtils.registerLogoutHandler("cookieClearingLogoutHandler")
+
+    }
+
+    if(grailsApplication.config.rundeck.security.enforceMaxSessions in [true,'true']) {
+        sessionRegistry(SessionRegistryImpl)
+        concurrentSessionFilter(ConcurrentSessionFilter, sessionRegistry)
+        registerSessionAuthenticationStrategy(RegisterSessionAuthenticationStrategy, ref('sessionRegistry')) {}
+        concurrentSessionControlAuthenticationStrategy(
+                ConcurrentSessionControlAuthenticationStrategy,
+                ref('sessionRegistry')
+        ) {
+            exceptionIfMaximumExceeded = false
+            maximumSessions = grailsApplication.config.rundeck.security.maxSessions ? grailsApplication.config.rundeck.security.maxSessions.toInteger() : 1
+        }
+        sessionFixationProtectionStrategy(SessionFixationProtectionStrategy) {
+            migrateSessionAttributes = grailsApplication.config.grails.plugin.springsecurity.sessionFixationPrevention.migrate
+            // true
+            alwaysCreateSession = grailsApplication.config.grails.plugin.springsecurity.sessionFixationPrevention.alwaysCreateSession
+            // false
+        }
+        sessionAuthenticationStrategy(
+                CompositeSessionAuthenticationStrategy,
+                [concurrentSessionControlAuthenticationStrategy, sessionFixationProtectionStrategy, registerSessionAuthenticationStrategy]
+        )
+    }
 
     //spring security preauth filter configuration
     if(grailsApplication.config.rundeck.security.authorization.preauthenticated.enabled in [true,'true']) {
@@ -401,17 +484,20 @@ beans={
             filter = ref("rundeckPreauthFilter")
             enabled = false
         }
+    }
+
+    if(grailsApplication.config.rundeck.security.authorization.preauthenticated.enabled in [true,'true']
+            || grailsApplication.config.grails.plugin.springsecurity.useX509 in [true,'true']) {
         preAuthenticatedAuthProvider(PreAuthenticatedAuthenticationProvider) {
             preAuthenticatedUserDetailsService = ref('rundeckUserDetailsService')
         }
-
     }
 
     if(grailsApplication.config.rundeck.useJaas in [true,'true']) {
         //spring security jaas configuration
         jaasApiIntegrationFilter(JaasApiIntegrationFilter)
 
-        jaasAuthProvider(DefaultJaasAuthenticationProvider) {
+        jaasAuthProvider(RundeckJaasAuthenticationProvider) {
             configuration = Configuration.getConfiguration()
             loginContextName = grailsApplication.config.rundeck.security.jaasLoginModuleName
             authorityGranters = [
@@ -419,12 +505,33 @@ beans={
             ]
         }
     } else {
+        jettyCompatiblePasswordEncoder(JettyCompatibleSpringSecurityPasswordEncoder)
         //if not using jaas for security provide a simple default
         Properties realmProperties = new Properties()
         realmProperties.load(new File(grailsApplication.config.rundeck.security.fileUserDataSource).newInputStream())
         realmPropertyFileDataSource(InMemoryUserDetailsManager, realmProperties)
         realmAuthProvider(DaoAuthenticationProvider) {
+            passwordEncoder = ref("jettyCompatiblePasswordEncoder")
             userDetailsService = ref('realmPropertyFileDataSource')
+        }
+    }
+
+    jettyServletCustomizer(JettyServletContainerCustomizer) {
+        def configParams = grailsApplication.config.rundeck?.web?.jetty?.servlet?.initParams
+
+        initParams = configParams?.toProperties()?.collectEntries {
+            [it.key.toString(), it.value.toString()]
+        }
+    }
+
+    rundeckAuthSuccessEventListener(RundeckAuthSuccessEventListener) {
+        frameworkService = ref('frameworkService')
+    }
+
+    if(grailsApplication.config.rundeck.security.syncLdapUser in [true,'true']) {
+        rundeckJaasAuthenticationSuccessEventListener(RundeckJaasAuthenticationSuccessEventListener) {
+            userService = ref("userService")
+            grailsApplication = grailsApplication
         }
     }
 }

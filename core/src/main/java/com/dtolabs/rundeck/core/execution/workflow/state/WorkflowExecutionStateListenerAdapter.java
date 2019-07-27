@@ -164,7 +164,10 @@ public class WorkflowExecutionStateListenerAdapter implements WorkflowExecutionL
         if (null != result && null != result.getFailureData()) {
             map.putAll(result.getFailureData());
         }
-        map.put("failureReason", null != result ? result.getFailureReason().toString() : "Unknown");
+        map.put(
+            "failureReason",
+            null != result && result.getFailureReason() != null ? result.getFailureReason().toString() : "Unknown"
+        );
         return map;
     }
 
@@ -183,9 +186,9 @@ public class WorkflowExecutionStateListenerAdapter implements WorkflowExecutionL
     }
 
     public void finishWorkflowItem(int step, StepExecutionItem item, StepExecutionResult result) {
-        if (NodeDispatchStepExecutor.STEP_EXECUTION_TYPE.equals(item.getType()) || item instanceof NodeStepExecutionItem) {
-            //dont notify
-        } else {
+        boolean isNodeStep = NodeDispatchStepExecutor.STEP_EXECUTION_TYPE.equals(item.getType())
+                             || NodeStepExecutionItem.isNodeStep(item);
+        if (!isNodeStep) {
             notifyAllStepState(createIdentifier(), createStepStateChange(result), new Date());
         }
         stepContext.finishStepContext();

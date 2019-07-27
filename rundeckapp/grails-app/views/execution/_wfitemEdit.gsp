@@ -35,24 +35,35 @@
             <span class="text-info"><g:message code="Workflow.stepErrorHandler.description" /></span>
         </g:if>
     %{--Job Reference item--}%
-        <g:if test="${'job'==newitemtype || item instanceof JobExec || (item instanceof java.util.Map && item?.jobName)}">
+        <g:if test="${'job'==newitemtype || item instanceof JobExec }">
             <section >
                 <div class="form-group">
+                    <label class="col-sm-2 control-label"><g:message code="Workflow.Step.jobreference.title" /></label>
+                    <div class="col-sm-10">
+                        <g:set var="isUseName" value="${ item?.useName || false }"/>
+                        <div class="radio">
+                            <g:radio id="useNameTrue"  name="useName" value="true"
+                                     onclick="_enableNameJobRefFields(true,'jobUuidField${rkey}','jobNameField${rkey}','jobGroupField${rkey}');"
+                                     checked="${!!isUseName}"/>
+                            <label for="useNameTrue">
+                                <g:message code="Workflow.Step.jobreference.name.label" />
+                            </label>
+                            <span class="text-primary"><g:message code="Workflow.Step.jobreference.name.description"/></span>
+                        </div>
+                        <div class="radio">
+                            <g:radio id="useNameFalse"  name="useName" value="false"
+                                     onclick="_enableNameJobRefFields(false,'jobUuidField${rkey}','jobNameField${rkey}','jobGroupField${rkey}');"
+                                     checked="${!isUseName}"/>
+                            <label for="useNameFalse">
+                                <g:message code="Workflow.Step.jobreference.uuid.label" />
+                            </label>
+                            <span class="text-primary"><g:message code="Workflow.Step.jobreference.uuid.description"/></span>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group">
                     <label class="col-sm-2 control-label" for="jobNameField${rkey}"><g:message code="Workflow.Step.jobreference.name-group.label" /></label>
-                    <div class="col-sm-3">
-
-                        <input id="jobNameField${rkey}" type="text" name="jobName" value="${enc(attr: item?.jobName)}"
-                               placeholder="${message(code:"scheduledExecution.jobName.label")}"
-                               class="form-control"
-                               size="100" autofocus/>
-                    </div>
-                    <div class="col-sm-3">
-                        <input id="jobGroupField${rkey}"  type="text" name="jobGroup" value="${enc(attr:item?.jobGroup)}" size="100"
-                               placeholder="${message(code:"scheduledExecution.groupPath.label")}"
-                               class="form-control"
-                        />
-                    </div>
-                    <div class="col-sm-2">
+                    <div class="col-sm-6">
                         <g:select name="jobProject" from="${fprojects}" id="jobProjectField${rkey}" value="${enc(attr:item?.jobProject)}" noSelection="${['':message(code:'step.type.jobreference.project.label',args:[project])]}"
                                   class="form-control "/>
                     </div>
@@ -60,11 +71,12 @@
                     <div class="col-sm-2">
                         <g:javascript>
                         fireWhenReady('jobProjectField${rkey}',function(){
+                            _enableNameJobRefFields(${isUseName},'jobUuidField${rkey}','jobNameField${rkey}','jobGroupField${rkey}','jobProjectField${rkey}');
                             _initJobPickerAutocomplete('jobUuidField${rkey}','jobNameField${rkey}','jobGroupField${rkey}','jobProjectField${rkey}');
                         });
                         </g:javascript>
 
-                        <span class="btn  btn-default act_choose_job" onclick="loadJobChooserModal(this,'jobUuidField${rkey}', 'jobNameField${rkey}','jobGroupField${rkey}', 'jobProjectField${rkey}','jobrefpicker${rkey}','jobrefpicker${rkey}_content');"
+                        <span class="btn btn-sm btn-default act_choose_job" onclick="loadJobChooserModal(this,'jobUuidField${rkey}', 'jobNameField${rkey}','jobGroupField${rkey}', 'jobProjectField${rkey}','jobrefpicker${rkey}','jobrefpicker${rkey}_content');"
                               id="jobChooseBtn${rkey}"
                               title="${message(code:"select.an.existing.job.to.use")}"
                               data-loading-text="Loading...">
@@ -74,14 +86,44 @@
                         <span id="jobChooseSpinner"></span>
                         <g:render template="/common/modal" model="${[modalid:'jobrefpicker'+rkey,modalsize:'modal-lg',title:message(code:"choose.a.job..."),buttons:[]]}"/>
                     </div>
+                    <div class="col-sm-10 col-sm-offset-2" style="maring-top:1em;">
+                      <p class="help-block">
+                        <g:message code="Workflow.Step.jobreference.jobName.help" />
+                      </p>
+                    </div>
                 </div>
+                <div class="form-group">
+                  <label class="col-sm-2 control-label"></label>
+                  <div class="col-sm-5">
+
+                      <input id="jobNameField${rkey}" type="text" name="jobName" value="${enc(attr: item?.jobName)}"
+                              placeholder="${message(code:"scheduledExecution.jobName.label")}"
+                              class="form-control"
+                              size="100" autofocus/>
+                  </div>
+                  <div class="col-sm-5">
+                      <input id="jobGroupField${rkey}"  type="text" name="jobGroup" value="${enc(attr:item?.jobGroup)}" size="100"
+                              placeholder="${message(code:"scheduledExecution.groupPath.label")}"
+                              class="form-control"
+                      />
+                  </div>
+                </div>
+
                 <div class="form-group" >
                     <label class="col-sm-2 control-label"><g:message code="Workflow.Step.uuid.label" /></label>
                     <div class="col-sm-10">
                         <input type='text' name="uuid" value="${enc(attr:item?.uuid)}" size="100"
+                            ${!isUseName?"":"readonly='true'"}
                                placeholder="${message(code:"Workflow.Step.jobreference.uuid.placeholder")}"
                                id="jobUuidField${rkey}"
                                class="form-control context_var_autocomplete"/>
+                    </div>
+                </div>
+                <div class="form-group" style="margin-top:1em;">
+                    <div class="col-sm-10 col-sm-offset-2">
+                        <div class="text-info">
+                            <g:message code="Workflow.Step.jobreference.uuid.help" />
+                        </div>
                     </div>
                 </div>
                 <div class="form-group" >
@@ -97,11 +139,11 @@
                     <label class="col-sm-2 control-label"></label>
                     <div class="col-sm-10">
                         <div class="checkbox">
-                            <label>
-                                <g:checkBox name="importOptions"
-                                            checked="${item?.importOptions}"
-                                            id="importOptionsCheck" value="true"
-                                />
+                            <g:checkBox name="importOptions"
+                                        checked="${item?.importOptions}"
+                                        id="importOptionsCheck" value="true"
+                            />
+                            <label for="importOptionsCheck">
                                 <g:message code="Workflow.Step.jobreference.import.options.label" />
                             </label>
                             <span class="text-primary"><g:message code="Workflow.Step.jobreference.import.options.help" /></span>
@@ -113,11 +155,27 @@
                     <label class="col-sm-2 control-label"></label>
                     <div class="col-sm-10">
                         <div class="checkbox">
-                            <label>
-                                <g:checkBox name="failOnDisable"
-                                            checked="${item?.failOnDisable}"
-                                            id="failOnDisableCheck" value="true"
-                                            />
+                            <g:checkBox name="ignoreNotifications"
+                                        checked="${item?.ignoreNotifications}"
+                                        id="ignoreNotificationsCheck" value="true"
+                            />
+                            <label for="ignoreNotificationsCheck">
+                                <g:message code="Workflow.Step.jobreference.ignore.notifications.label" />
+                            </label>
+                            <span class="text-primary"><g:message code="Workflow.Step.jobreference.ignore.notifications.help" /></span>
+                        </div>
+                    </div>
+
+                </div>
+                <div class="form-group" >
+                    <label class="col-sm-2 control-label"></label>
+                    <div class="col-sm-10">
+                        <div class="checkbox">
+                            <g:checkBox name="failOnDisable"
+                                        checked="${item?.failOnDisable}"
+                                        id="failOnDisableCheck" value="true"
+                                        />
+                            <label for="failOnDisableCheck">
                                 <g:message code="Workflow.Step.jobreference.fail.on.disabled.label" />
                             </label>
                             <span class="text-primary"><g:message code="Workflow.Step.jobreference.fail.on.disabled.help" /></span>
@@ -129,7 +187,7 @@
     <g:set var="nodeFilterOverrideExpanded" value="${item?.nodeFilter || item?.nodeIntersect}"/>
     <div class="row">
     <div class="col-sm-2 control-label">
-    <span class="btn ${wdgt.css(if: nodeFilterOverrideExpanded, then: 'active')}" data-toggle="collapse" data-target="#nodeFilterOverride${enc(attr: rkey)}">
+    <span class="btn btn-sm ${wdgt.css(if: nodeFilterOverrideExpanded, then: 'active')}" data-toggle="collapse" data-target="#nodeFilterOverride${enc(attr: rkey)}">
         <g:message code="override.node.filters" />
         <i class="glyphicon ${wdgt.css(if: nodeFilterOverrideExpanded, then: 'glyphicon-chevron-down', else: 'glyphicon-chevron-right')} "></i>
     </span>
@@ -138,13 +196,13 @@
     </section>
 
     <section id="nodeFilterOverride${enc(attr: rkey)}" class="collapse-expandable collapse ${wdgt.css(if: nodeFilterOverrideExpanded, then: 'in')} node_filter_link_holder section-separator-solo">
-    <div class="form-group">
-        <div class="col-sm-12 ">
-            <div class="text-info">
-                <g:message code="JobExec.property.nodeFilter.help.description" />
-            </div>
-        </div>
-    </div>
+                <div class="form-group" style="margin-top:1em;">
+                    <div class="col-sm-12 ">
+                        <div class="text-info">
+                            <g:message code="JobExec.property.nodeFilter.help.description" />
+                        </div>
+                    </div>
+                </div>
 
                 <div class="form-group" >
                     <label class="col-sm-2 control-label ">
@@ -153,15 +211,15 @@
 
                     <div class="col-sm-10">
                         <div class="radio">
-                            <label >
-                                <g:radio name="nodeIntersect" value="" checked="${item?.nodeIntersect==null}"/>
+                            <g:radio id="nodeIntersectFalse" name="nodeIntersect" value="" checked="${item?.nodeIntersect==null}"/>
+                            <label for="nodeIntersectFalse">
                                 <g:message code="scheduledExecution.property.nodeIntersect.false"/>
                             </label>
                         </div>
 
                         <div class="radio">
-                            <label>
-                                <g:radio name="nodeIntersect" value="true" checked="${item?.nodeIntersect!=null&&item?.nodeIntersect}"/>
+                            <g:radio id="nodeIntersectTrue" name="nodeIntersect" value="true" checked="${item?.nodeIntersect!=null&&item?.nodeIntersect}"/>
+                            <label for="nodeIntersectTrue">
                                 <g:message code="scheduledExecution.property.nodeIntersect.true"/>
                             </label>
                         </div>
@@ -177,7 +235,7 @@
                     <div class="col-sm-10">
                         <g:set var="filtvalue" value="${item?.nodeFilter}"/>
 
-                        <span class="input-group nodefilters">
+                        <span class="input-group multiple-control-input-group nodefilters">
                             <g:if test="${session.user && User.findByLogin(session.user)?.nodefilters}">
                                 <g:set var="filterset" value="${User.findByLogin(session.user)?.nodefilters}"/>
                             </g:if>
@@ -260,25 +318,22 @@
 
                     <div class="col-sm-10">
                         <div class="radio">
-                            <label >
-                                <g:radio name="nodeKeepgoing" value="" checked="${item?.nodeKeepgoing==null}"
-                                         data-bind="enable: filter()"/>
+                            <g:radio name="nodeKeepgoing" value="" checked="${item?.nodeKeepgoing==null}" data-bind="enable: filter()" id="nodeKeepgoingNull"/>
+                            <label for="nodeKeepgoingNull">
                                 <g:message code="JobExec.property.nodeKeepgoing.null.description"/>
                             </label>
                         </div>
 
                         <div class="radio">
-                            <label >
-                                <g:radio name="nodeKeepgoing" value="true" checked="${item?.nodeKeepgoing!=null&&item?.nodeKeepgoing}"
-                                         data-bind="enable: filter()"/>
+                            <g:radio name="nodeKeepgoing" value="true" checked="${item?.nodeKeepgoing!=null&&item?.nodeKeepgoing}" data-bind="enable: filter()" id="nodeKeepgoingTrue"/>
+                            <label for="nodeKeepgoingTrue">
                                 <g:message code="Workflow.property.keepgoing.true.description"/>
                             </label>
                         </div>
 
                         <div class="radio">
-                            <label >
-                                <g:radio name="nodeKeepgoing" value="false" checked="${item?.nodeKeepgoing!=null&&!item?.nodeKeepgoing}"
-                                         data-bind="enable: filter()"/>
+                            <g:radio name="nodeKeepgoing" value="false" checked="${item?.nodeKeepgoing!=null&&!item?.nodeKeepgoing}" data-bind="enable: filter()" id="nodeKeepgoingFalse"/>
+                            <label for="nodeKeepgoingFalse">
                                 <g:message  code="Workflow.property.keepgoing.false.description"/>
                             </label>
                         </div>
@@ -311,26 +366,30 @@
 
                     <div class="col-sm-10">
                         <div class="radio">
-                            <label>
-                                <g:radio name="nodeRankOrderAscending" value=""
-                                         checked="${item?.nodeRankOrderAscending == null}"
-                                         data-bind="enable: filter()"/>
+                            <g:radio name="nodeRankOrderAscending" value=""
+                                   checked="${item?.nodeRankOrderAscending == null}"
+                                   data-bind="enable: filter()"
+                                   id="nodeRankOrderAscendingNull"/>
+                            <label for="nodeRankOrderAscendingNull">
                                 <g:message code="JobExec.property.nodeRankOrder.null.description"/>
                             </label>
                         </div>
                         <div class="radio">
-                            <label>
-                                <g:radio name="nodeRankOrderAscending" value="true"
-                                         checked="${item?.nodeRankOrderAscending == Boolean.TRUE}"
-                                         data-bind="enable: filter()"/>
+                          <g:radio name="nodeRankOrderAscending" value="true"
+                                   checked="${item?.nodeRankOrderAscending == Boolean.TRUE}"
+                                   data-bind="enable: filter()"
+                                   id="nodeRankOrderAscending"/>
+                            <label for="nodeRankOrderAscending">
                                 <g:message code="scheduledExecution.property.nodeRankOrder.ascending.label"/>
                             </label>
                         </div>
                         <div class="radio">
-                            <label>
-                                <g:radio name="nodeRankOrderAscending" value="false"
-                                         checked="${item?.nodeRankOrderAscending == Boolean.FALSE}"
-                                         data-bind="enable: filter()"/>
+                          <g:radio name="nodeRankOrderAscending" value="false"
+                                   checked="${item?.nodeRankOrderAscending == Boolean.FALSE}"
+                                   data-bind="enable: filter()"
+                                   id="nodeRankOrderDescending"/>
+
+                            <label for="nodeRankOrderDescending">
                                 <g:message code="scheduledExecution.property.nodeRankOrder.descending.label"/>
                             </label>
                         </div>
@@ -343,19 +402,16 @@
                     <label class="col-sm-2 control-label"><g:message code="JobExec.nodeStep.title" /></label>
                     <div class="col-sm-10">
                         <div class="radio">
-                            <label>
-                                <g:radio id="jobNodeStepFieldTrue"  name="nodeStep" value="true"
-                                         checked="${!!isNodeStep}"/>
-
+                            <g:radio id="jobNodeStepFieldTrue"  name="nodeStep" value="true"
+                                   checked="${!!isNodeStep}"/>
+                            <label for="jobNodeStepFieldTrue">
                                 <g:message code="JobExec.nodeStep.true.label" />
                             </label>
                             <span class="text-primary"><g:message code="JobExec.nodeStep.true.description"/></span>
                         </div>
                         <div class="radio">
-                            <label>
-                                <g:radio id="jobNodeStepFieldFalse"  name="nodeStep" value="false"
-                                         checked="${!isNodeStep}"/>
-
+                            <g:radio id="jobNodeStepFieldFalse"  name="nodeStep" value="false" checked="${!isNodeStep}"/>
+                            <label for="jobNodeStepFieldFalse">
                                 <g:message code="JobExec.nodeStep.false.label" />
                             </label>
                             <span class="text-primary"><g:message code="JobExec.nodeStep.false.description"/></span>
@@ -441,7 +497,7 @@
                     <g:set var="hasAdvanced" value="${item?.scriptInterpreter || item?.interpreterArgsQuoted || item?.fileExtension}"/>
                     <div class="row">
                         <div class="col-sm-2 control-label">
-                            <span class="btn ${wdgt.css(if: hasAdvanced, then:'active')}" data-toggle="collapse" data-target="#scriptInterpreter${rkey}">
+                            <span class="btn btn-sm ${wdgt.css(if: hasAdvanced, then:'active')}" data-toggle="collapse" data-target="#scriptInterpreter${rkey}">
                                 Advanced
                                 <i class="glyphicon ${wdgt.css(if: hasAdvanced, then: 'glyphicon-chevron-down', else:'glyphicon-chevron-right')} "></i>
                             </span>
@@ -488,11 +544,11 @@
                         <div class="form-group">
                             <div class="col-sm-offset-2 col-sm-10">
                                 <div class="checkbox">
-                                    <label>
-                                        <g:checkBox name="interpreterArgsQuoted"
-                                                    checked="${item?.interpreterArgsQuoted}"
-                                                    id="interpreterArgsQuotedField" value="true"
-                                                    data-bind="checked: argsQuoted"/>
+                                  <g:checkBox name="interpreterArgsQuoted"
+                                              checked="${item?.interpreterArgsQuoted}"
+                                              id="interpreterArgsQuotedField" value="true"
+                                              data-bind="checked: argsQuoted"/>
+                                    <label for="interpreterArgsQuotedField">
                                         <g:message code="Workflow.Step.interpreterArgsQuoted.label"/>
                                     </label>
                                     <span class="action"
@@ -559,7 +615,7 @@
                             <div class="col-sm-2 control-label"><g:message code="Workflow.step.script.execution.preview.label" /></div>
 
                             <div id='interpreterArgsQuotedHelp${rkey}_preview' class="col-sm-10 form-control-static">
-                                <code>$ <span data-bind="html: invocationPreviewHtml"></span></code>
+                                <code>$ <span data-bind="text: invocationPreviewHtml"></span></code>
                             </div>
 
                             <g:embedJSON id="scriptStepData_${rkey}" data="${[invocationString: item?.scriptInterpreter?:'',fileExtension: item?.fileExtension?:'',args: item?.argString?:'',argsQuoted: item?.interpreterArgsQuoted?true:false]}"/>
@@ -581,11 +637,16 @@
             <g:set var="serviceName" value="${isNodeStep ? 'WorkflowNodeStep' : 'WorkflowStep'}"/>
             <div>
                 <div>
-                    <span class="h4"><stepplugin:message
+                    <span class="h4"><stepplugin:pluginIcon
                             service="${serviceName}"
                             name="${newitemDescription.name}"
-                            code="plugin.title"
-                            default="${newitemDescription.title}"/></span>
+                            width="16px"
+                            height="16px"/>
+                        <stepplugin:message
+                                service="${serviceName}"
+                                name="${newitemDescription.name}"
+                                code="plugin.title"
+                                default="${newitemDescription.title}"/></span>
                     <span class="help-block">
                         <g:render template="/scheduledExecution/description"
                                   model="[description: stepplugin.messageText(
@@ -608,6 +669,7 @@
                     <g:set var="pluginprefix" value="pluginConfig."/>
                     <g:render template="/framework/pluginConfigPropertiesInputs" model="${[
                             extraInputCss: 'context_var_autocomplete',
+                            groupTitleCss      : 'h5',
                             service            : serviceName,
                             dynamicProperties  : dynamicProperties,
                             provider           : newitemDescription.name,
@@ -637,15 +699,16 @@
             </div>
         </g:elseif>
         <g:if test="${isErrorHandler}">
-            <div class="presentation">
-                <label>
-                    <g:checkBox name="keepgoingOnSuccess" value="true" checked="${item?.keepgoingOnSuccess}"/>
+            <div class="presentation checkbox">
+                <g:checkBox name="keepgoingOnSuccess" id="keepgoingOnSuccess" value="true" checked="${item?.keepgoingOnSuccess}"/>
+                <label for="keepgoingOnSuccess">
                     <g:message code="Workflow.stepErrorHandler.keepgoingOnSuccess.label" />
                 </label>
                 <span class="text-primary"><g:message code="Workflow.stepErrorHandler.keepgoingOnSuccess.description" /></span>
             </div>
         </g:if>
         <g:else>
+            <hr/>
             <div class="form-group">
                 <label class="col-sm-2 control-label" for="description${rkey}"><g:message
                         code="Workflow.step.property.description.label"/></label>
@@ -663,10 +726,6 @@
         <g:hiddenField name="scheduledExecutionId" value="${scheduledExecutionId}"/>
         <div class="floatr" style="margin:10px 0;">
             <g:set var="msgItem" value="${isErrorHandler ? 'stepErrorHandler' : 'step'}"/>
-            <span class="warn note cancelsavemsg" style="display:none;">
-                <g:message code="scheduledExecution.workflow.${msgItem}.Item.unsaved.warning"
-                           default="Discard or save changes to this Workflow Step before completing changes to the job"/>
-            </span>
             <g:if test="${newitemtype||newitem}">
                 <g:hiddenField name="newitem" value="true"/>
                 <g:hiddenField name="newitemtype" value="${newitemtype}"/>
@@ -691,6 +750,10 @@
                 <span class="btn btn-primary btn-sm" onclick="_wfisave('${key}',${num}, 'wfiedit_${rkey}', ${ isErrorHandler?true:false});"
                       title="${message(code:"Workflow."+msgItem+".save.title")}"><g:message code="button.action.Save" /></span>
             </g:else>
+            <span class="text-warning cancelsavemsg" style="display:none;">
+                <g:message code="scheduledExecution.workflow.${msgItem}.Item.unsaved.warning"
+                           default="Discard or save changes to this Workflow Step before completing changes to the job"/>
+            </span>
         </div>
         <div class="clear"></div>
     </div>

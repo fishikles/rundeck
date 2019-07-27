@@ -17,6 +17,7 @@ package rundeckapp.init
 
 import com.dtolabs.rundeck.core.utils.ZipUtil
 import grails.util.Environment
+import org.rundeck.security.CliAuthTester
 import org.springframework.core.io.ClassPathResource
 import org.springframework.core.io.Resource
 import rundeckapp.Application
@@ -53,6 +54,11 @@ class RundeckInitializer {
     public static final String SPRING_BOOT_ENABLE_SSL_PROP = "server.ssl.enabled"
     private static final String LINESEP = System.getProperty("line.separator");
 
+    private static final String WAR_BASE = "WEB-INF/classes"
+    private static final String FILE_PROTOCOL = "file:"
+
+    private static final List<String> SUPPRESS_JAR_EXTRACT_FAILURE_LIST = ["jna-platform-4.1.0.jar","jna-4.1.0.jar"]
+
     private File basedir;
     private File serverdir;
     String coreJarName
@@ -64,6 +70,8 @@ class RundeckInitializer {
     File toolsdir;
     File toolslibdir;
 
+    private static boolean vfsDirectoryDetected = false
+
     /**
      * Config properties are defaulted in config-defaults.properties, but can be overridden by system properties
      */
@@ -71,7 +79,6 @@ class RundeckInitializer {
         "server.http.port",
         "server.https.port",
         "server.hostname",
-        "server.web.context",
         "rdeck.base",
         SERVER_DATASTORE_PATH,
         "default.user.name",
@@ -95,7 +102,12 @@ class RundeckInitializer {
         setSystemProperties()
         initSsl()
 
-        File installCompleteMarker = new File(config.baseDir+"/var/.install_complete")
+        if(config.isTestAuth()) {
+            CliAuthTester authTester = new CliAuthTester()
+            System.exit(authTester.testAuth(config) ? 0 : 1)
+        }
+
+        File installCompleteMarker = new File(config.baseDir+"/var/.install_complete-"+System.getProperty("build.ident","missing-ver"))
         if(!(config.isSkipInstall() || installCompleteMarker.exists())) {
             //installation tasks
             createDirectories()
@@ -134,9 +146,18 @@ class RundeckInitializer {
         if(!coreJar.parentFile.exists()) coreJar.parentFile.mkdirs()
         coreJar.createNewFile()
         if(thisJar.isDirectory()) {
-            def coreJarLoc = ((URLClassLoader)Thread.currentThread().contextClassLoader).getURLs().find { it.toString().endsWith(coreJarName) }
-            coreJarLoc.withInputStream {
-                coreJar << it
+            def coreJarLoc = null
+            if(Thread.currentThread().contextClassLoader instanceof URLClassLoader) {
+                coreJarLoc = ((URLClassLoader) Thread.currentThread().contextClassLoader).getURLs().
+                        find { it.toString().endsWith(coreJarName) }
+            }
+            if (!coreJarLoc && thisJar.name == "classes") {
+                coreJarLoc = new File(thisJar.parentFile, "lib/" + coreJarName)
+            }
+            if(coreJarLoc) {
+                coreJarLoc.withInputStream {
+                    coreJar << it
+                }
             }
         } else {
             ZipFile springBootJar = new ZipFile(thisJar)
@@ -190,7 +211,7 @@ class RundeckInitializer {
             final String jarpath = "WEB-INF/lib";
             for (final String jarName : jars) {
                 ZipUtil.extractZip(thisJar.getAbsolutePath(), toolslibdir, jarpath + "/" + jarName, jarpath + "/");
-                if (!new File(toolslibdir, jarName).exists()) {
+                if (!new File(toolslibdir, jarName).exists() && !SUPPRESS_JAR_EXTRACT_FAILURE_LIST.contains(jarName)) {
                     ERR(
                             "Failed to extract dependent jar for tools into " + toolslibdir.getAbsolutePath() +
                             ": " +
@@ -211,14 +232,21 @@ class RundeckInitializer {
     }
 
     void copyLibsToToolsNonJar(final File toolslibdir, final String[] jarNamesToCopy) {
-        def classlibList = ((URLClassLoader)Thread.currentThread().contextClassLoader).getURLs()
+        def classlibList = []
+        if(Thread.currentThread().contextClassLoader instanceof URLClassLoader) {
+            classlibList = ((URLClassLoader) Thread.currentThread().contextClassLoader).getURLs()
+        }
         jarNamesToCopy.each { jarName ->
             def sourceJar = classlibList.find { it.toString().endsWith(jarName) }
+            if(thisJar.name == "classes") {  //thisJar is WEB-INF/classes
+                sourceJar = new File(thisJar.parentFile,"lib/"+jarName)
+                if(!sourceJar.exists()) sourceJar = null
+            }
             if(sourceJar) {
                 File jarDest = new File(toolslibdir,jarName)
                 jarDest << sourceJar.newInputStream()
             } else {
-                ERR("Failed to extract dependant jar ${jarName} into tools dir: ${toolslibdir.absolutePath}")
+                if(!SUPPRESS_JAR_EXTRACT_FAILURE_LIST.contains(jarName)) ERR("Failed to extract dependant jar ${jarName} into tools dir: ${toolslibdir.absolutePath}")
             }
         }
     }
@@ -266,9 +294,27 @@ class RundeckInitializer {
             protectionDomain = baseClass.getProtectionDomain()
         }
 
-        final URL location = protectionDomain.getCodeSource().getLocation();
+        URL location = protectionDomain.getCodeSource().getLocation();
+        if(location.toString().startsWith("vfs:")) {
+            //This is probably a jboss based server
+            def vfsFile = location.getContent()
+            vfsDirectoryDetected = true
+            if(location.toString().endsWith(WAR_BASE)) {
+                return vfsFile.getPhysicalFile()
+            }
+        }
 
         try {
+            if(Environment.isWarDeployed()) {
+                String sloc = location.toString()
+                if(sloc.endsWith(".class") && sloc.contains(WAR_BASE)) {
+                    //An unusual case where the location returned by the protection domain code source did not give us a usable location.
+                    //Seen in Tomcat 7 on Centos 7
+                    String webinfclassesdir = sloc.substring(FILE_PROTOCOL.length(),sloc.indexOf(WAR_BASE)+WAR_BASE.length())
+                    return new File(webinfclassesdir)
+                }
+            }
+
             return new File(location.toURI());
         } catch (URISyntaxException e) {
             throw new RuntimeException(e);
@@ -309,15 +355,56 @@ class RundeckInitializer {
         String destinationFilePath = props.getProperty(renamedDestFileName+LOCATION_SUFFIX) ?: destDir.absolutePath +"/" + sourceDirPath.relativize(sourceTemplate.parentFile.toPath()).toString()+"/"+renamedDestFileName
 
         File destinationFile = new File(destinationFilePath)
-
+        if(renamedDestFileName == "log4j.properties" && Environment.isWarDeployed() && !vfsDirectoryDetected) {
+            destinationFile = new File(thisJar.absolutePath,renamedDestFileName)
+        }
+        if(destinationFile.name.contains("._")) return //skip partials here
         if(!overwrite && destinationFile.exists()) return
         if(!destinationFile.parentFile.exists()) destinationFile.parentFile.mkdirs()
         DEBUG("Writing config file: " + destinationFile.getAbsolutePath());
         expandTemplate(sourceTemplate.newInputStream(),destinationFile.newOutputStream(),props)
+
+        //add partial templates to destination
+        File sourceDir = sourceTemplate.parentFile
+        int i = 1;
+        File partial = new File(sourceDir, destinationFile.getName() + "._" + i+".template");
+        while (partial.exists()) {
+            DEBUG("Adding partial template: " + partial.name)
+            ByteArrayOutputStream out = new ByteArrayOutputStream()
+            expandTemplate(partial.newInputStream(),out,props)
+            destinationFile << out.toString()
+            i++;
+            partial = new File(sourceDir, destinationFile.getName() + "._" + i+".template");
+        }
+
+        if(renamedDestFileName == "rundeck-config.properties" && Environment.isWarDeployed() && !vfsDirectoryDetected) {
+            List<String> rundeckConfig = destinationFile.readLines()
+            destinationFile.withOutputStream { out ->
+                rundeckConfig.each { line ->
+                    if(line.startsWith("rundeck.log4j.config.file")) out << "#"
+                    out << line + "\n"
+                }
+            }
+        }
     }
+    private static final Map<String, List<String>> LEGACY_SYS_PROP_CONVERSION = [
+        'server.http.port'                      : ['server.port'],
+        'server.http.host'                      : ['server.host', 'server.address'],
+        (RundeckInitConfig.SYS_PROP_WEB_CONTEXT): ['server.contextPath'],
+        'rundeck.jetty.connector.forwarded'     : ['server.useForwardHeaders']
+    ]
 
     void setSystemProperties() {
+
+        LEGACY_SYS_PROP_CONVERSION.each { String k, vals ->
+            if (System.getProperty(k)) {
+                vals.each { String newkey ->
+                    System.setProperty(newkey, System.getProperty(k))
+                }
+            }
+        }
         System.setProperty("server.http.port", config.runtimeConfiguration.getProperty("server.http.port"));
+
         System.setProperty(RundeckInitConfig.SYS_PROP_RUNDECK_BASE_DIR, forwardSlashPath(config.baseDir));
         System.setProperty(RundeckInitConfig.SYS_PROP_RUNDECK_SERVER_CONFIG_DIR, forwardSlashPath(config.configDir));
         System.setProperty(RundeckInitConfig.SYS_PROP_RUNDECK_SERVER_DATA_DIR, forwardSlashPath(config.serverBaseDir));
@@ -336,13 +423,16 @@ class RundeckInitializer {
         }
 
         if (config.useJaas) {
-            System.setProperty("java.security.auth.login.config", new File(config.configDir,
-                                                                           config.runtimeConfiguration.getProperty("loginmodule.conf.name")).getAbsolutePath());
+            if(! System.getProperty("java.security.auth.login.config"))
+                System.setProperty("java.security.auth.login.config", new File(config.configDir,
+                                                                               config.runtimeConfiguration.getProperty("loginmodule.conf.name")).getAbsolutePath());
             System.setProperty(PROP_LOGINMODULE_NAME, config.runtimeConfiguration.getProperty(PROP_LOGINMODULE_NAME));
         }
+        //Set runtime environment
+        System.setProperty("rd.rtenv",Environment.current.name.toLowerCase())
     }
 
-    private void initConfigurations() {
+    void initConfigurations() {
         final Properties defaults = loadDefaults(CONFIG_DEFAULTS_PROPERTIES);
         final Properties configuration = createConfiguration(defaults);
         configuration.put(PROP_REALM_LOCATION, forwardSlashPath(config.configDir)
@@ -360,6 +450,7 @@ class RundeckInitializer {
         toolsdir = createDir(null,basedir,"tools")
         toolslibdir = createDir(null,toolsdir,"lib")
         createDir(null,basedir,"var")
+        createDir(null,basedir,"user-assets")
     }
 
     File createDir(String specifiedPath, File base, String child) {
@@ -631,7 +722,7 @@ class RundeckInitializer {
      *
      * @param s
      */
-    private void LOG(final String s) {
+    static private void LOG(final String s) {
         System.out.println(s);
     }
     /**
@@ -639,7 +730,7 @@ class RundeckInitializer {
      *
      * @param s
      */
-    private void ERR(final String s) {
+    static private void ERR(final String s) {
         System.err.println("ERROR: " + s);
     }
 

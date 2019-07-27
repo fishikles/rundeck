@@ -11,7 +11,8 @@ stages:
 - name: build
   if: fork = false
 - name: test
-  if: fork = false
+  # Run tests on non-forked PR and master builds
+  if: fork = false AND (branch = master OR tag IS present)
 - name: snapshot release
   if: fork = false AND type = push AND (branch = master OR env(RUNDECK_RELEASE) IS present) AND tag IS blank
 - name: tag release
@@ -20,13 +21,12 @@ stages:
   if: fork = true
 
 before_cache:
-  - rm -f  gradle-cache/caches/modules-2/modules-2.lock
-  - rm -fr gradle-cache/caches/*/plugin-resolution/
-
+- rm -f $HOME/.gradle/caches/modules-2/modules-2.lock
+- rm -fr $HOME/.gradle/caches/*/plugin-resolution/
 cache:
   directories:
-    - gradle-cache/wrapper/
-    - gradle-cache/caches/
+  - "$HOME/.gradle/caches/"
+  - "$HOME/.gradle/wrapper/"
 
 before_install:
 - sudo apt-get update -qq
@@ -35,6 +35,7 @@ before_install:
 - pip install awscli --upgrade --user
 install: true
 before_script:
+- source scripts/travis-helpers.sh
 - export -f travis_nanoseconds
 - export -f travis_fold
 - export -f travis_time_start
@@ -45,132 +46,150 @@ jobs:
   # Stage: build
   - stage: build
     script:
-    - set -o errexit
-    - shopt -s globstar
-    - source scripts/travis-helpers.sh
-
-    - script_block 'build' 'make TAG=$RUNDECK_RELEASE_TAG BUILD_NUM=$RUNDECK_BUILD_NUMBER rpm deb'
+    # Build artifacts: jars, wars, and docker images
+    - script_block 'build' 'bash scripts/travis-build.sh build'
     - script_block 'build.docker.rdtest' build_rdtest
-
+    # Copy artifacts and upload to s3
     - mkdir -p artifacts/packaging
     - mkdir -p artifacts/rundeckapp/build
 
-    - find ./packaging -regex '.*\.\(deb\|rpm\)' -exec cp --parents {} artifacts \;
-    - cp -r --parents core/build/libs artifacts/
-    - cp -r --parents rundeckapp/**/build/libs artifacts/
-    - cp -r --parents rundeck-storage/**/build/libs artifacts/
+    # Publish official docker snapshot
+    - script_block 'docker.official' 'bash scripts/travis-build.sh buildDocker'
 
-    - script_block 'sync-artifacts' sync_to_s3
-  
+    # Sync artifacts and trigger downstream snapshot builds if appropriate
+    - script_block 'sync-artifacts' 'copy_artifacts && sync_to_s3'
+    - script_block 'trigger.downstream' trigger_downstream_snapshots
+
+    # Trigger rundeck/testdeck build
+    - script_block 'travis-trigger.testdeck' 'trigger_travis_build "${TRAVIS_OSS_TOKEN}" org rundeck testdeck ${RUNDECK_BRANCH} || true'
+
   # Stage: test
   - stage: test
     env: JOB='Test Grails'
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
     - script_block 'grails-test' './gradlew -g gradle-cache --build-cache test'
 
   - env: JOB='Docker API tests'
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
     - script_block 'docker.pull' pull_rdtest
     - script_block 'api-test' 'DOCKER_COMPOSE_SPEC=docker-compose-api-mysql.yaml bash test/run-docker-api-tests.sh'
 
-  - stage: test
-    env: JOB='Test deb install'
+  - env: JOB='Docker Tomcat 8 API tests'
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
-    - script_block 'deb-test' 'bash test/test-docker-install-deb.sh'
+    - script_block 'api-test' 'bash test/run-docker-tomcat-tests.sh'
+
+  - env: JOB='Docker Tomcat 7 API tests'
+    script:
+    - script_block 'sync-artifacts' fetch_common_artifacts
+    - script_block 'api-test' 'bash test/run-docker-tomcat-tests.sh 7-jre8'
+
+  # - stage: test
+  #   env: JOB='Test deb install'
+  #   script:
+  #   - script_block 'sync-artifacts' fetch_common_artifacts
+  #   - script_block 'deb-test' 'bash test/test-docker-install-deb.sh'
   
-  - env: JOB='Test rpm install'
-    script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
-    - script_block 'sync-artifacts' fetch_common_artifacts
-    - script_block 'rpm-test' 'bash test/test-docker-install-rpm.sh'
+  # - env: JOB='Test rpm install'
+  #   script:
+  #   - script_block 'sync-artifacts' fetch_common_artifacts
+  #   - script_block 'rpm-test' 'bash test/test-docker-install-rpm.sh'
 
   - env: JOB='Docker tests'
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
     - script_block 'docker.pull' pull_rdtest
     - script_block 'docker-test' 'bash test/run-docker-tests.sh'
   
   - env: JOB='Docker SSL tests'
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
     - script_block 'docker.pull' pull_rdtest
     - script_block 'docker-ssl-test' 'bash test/run-docker-ssl-tests.sh'
 
   - env: JOB='Docker Ansible tests'
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
     - script_block 'docker.pull' pull_rdtest
     - script_block 'docker-ansible-test' 'bash test/run-docker-ansible-tests.sh'
 
+  - env: JOB='Docker LDAP tests'
+    script:
+    - script_block 'sync-artifacts' fetch_common_artifacts
+    - script_block 'docker.pull' pull_rdtest
+    - script_block 'docker-ldap-test' 'bash test/run-docker-ldap-tests.sh'
+
+  - env: JOB='Docker LDAP Bind tests'
+    script:
+    - script_block 'sync-artifacts' fetch_common_artifacts
+    - script_block 'docker.pull' pull_rdtest
+    - script_block 'docker-ldap-bind-test' 'DOCKER_COMPOSE_SPEC=docker-compose-ldap-binding-test.yaml bash test/run-docker-ldap-tests.sh'
+
+  - env: JOB='Docker PAM tests'
+    script:
+    - script_block 'sync-artifacts' fetch_common_artifacts
+    - script_block 'docker.pull' pull_rdtest
+    - script_block 'docker-pam-test' 'bash test/run-docker-pam-tests.sh'
+
+  # - env: JOB='Docker Selenium tests'
+  #   script:
+  #   - script_block 'docker.pull' pull_rundeck
+  #   - script_block 'selenium' 'bash test/selenium/travis.sh'
+
   # # Stage: snapshot release publishes snapshot artifacts to external repositories
   - stage: snapshot release
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     # Sync artifacts under commit so we can use them for tag releases
     - script_block 'sync.artifacts' fetch_common_artifacts
     - script_block 'sync.ci-resources' fetch_common_resources
     - script_block 'sync.commit' sync_commit_to_s3
     - export VCS_URL=https://github.com/rundeck/rundeck.git
     # Delete existing packages
-    - script_block 'delete.deb' 'bash scripts/delete-bintray-package.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck ci-snapshot-deb rundeck'
-    - script_block 'delete.rpm-rundeck' 'bash scripts/delete-bintray-package.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck ci-staging-rpm rundeck'
-    - script_block 'delete.mavan-rpm-config' 'bash scripts/delete-bintray-package.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck ci-staging-rpm rundeck-config'
+    # - script_block 'delete.deb' 'bash scripts/delete-bintray-package.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck  dev-deb rundeck'
+    # - script_block 'delete.rpm-rundeck' 'bash scripts/delete-bintray-package.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck dev-rpm rundeck'
+    - script_block 'delete.mavan-rpm-config' 'bash scripts/delete-bintray-package.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck dev-rpm rundeck-config'
     # Deploy new snapshot packages
-    - script_block 'publish.deb' 'bash scripts/deploy-deb-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck ci-snapshot-deb "${RUNDECK_RELEASE_TAG}" "${RUNDECK_BUILD_NUMBER}"'
-    - script_block 'publish.rpm' 'bash scripts/deploy-rpm-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck ci-staging-rpm "${RUNDECK_RELEASE_TAG}"'
-    - script_block 'publish.maven' 'bash scripts/deploy-maven-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck ci-snapshot-maven "${RUNDECK_BUILD_NUMBER}"'
-    - export RELEASE_OPTS="-Psigning.keyId=${RUNDECK_SIGNING_KEYID} -Psigning.password=${RUNDECK_SIGNING_PASSWORD} -PsonatypeUsername=${SONATYPE_USERNAME} -PsonatypePassword=${SONATYPE_PASSWORD} -Poss-releases.username=${OSS_RELEASES_USERNAME} -Poss-releases.password=${OSS_RELEASES_PASSWORD} -Poss-releases.url=https://oss.sonatype.org/index.html#stagingRepositories -Psigning.secretKeyRingFile=$(pwd)/ci-resources/secring.gpg"
-    - script_block 'build.artifacts' 'bash jenkins-build.sh upload "${RUNDECK_RELEASE_TAG}"'
-    - script_block 'travis-trigger.rdpro' 'trigger_travis_build "${TRAVIS_RDPRO_TOKEN}" rundeckpro rundeckpro master'
+    # - script_block 'publish.deb' 'bash scripts/deploy-deb-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck dev-deb'
+    # - script_block 'publish.rpm' 'bash scripts/deploy-rpm-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck dev-rpm'
+    - script_block 'publish.maven' 'bash scripts/deploy-maven-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck dev-maven "${RUNDECK_BUILD_NUMBER}"'
+    # Seal artifacts
+    - script_block 'seal-artifacts' seal_artifacts
+    # Upload to sonatype
+    - script_block 'oss.publish' './gradlew uploadExisting -PsonatypeUsername="${SONATYPE_USERNAME}" -PsonatypePassword="${SONATYPE_PASSWORD}" --info'
 
   # Stage: tag release publishes artifacts to the appropriate external repsositories
   - stage: tag release
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
     - script_block 'sync-artifacts' fetch_common_artifacts
+    - script_block 'sync.ci-resources' fetch_common_resources
     - export VCS_URL=https://github.com/rundeck/rundeck.git
 
     # Deploy new snapshot packages
-    - bash scripts/deploy-deb-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck "${BINTRAY_DEB_REPO}" "${RUNDECK_RELEASE_TAG}" "${RUNDECK_BUILD_NUMBER}"
-    - bash scripts/deploy-rpm-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck "${BINTRAY_RPM_REPO}" "${RUNDECK_RELEASE_TAG}"
-    - bash scripts/deploy-maven-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck "${BINTRAY_MAVEN_REPO}" "${RUNDECK_BUILD_NUMBER}"
+    # - bash scripts/deploy-deb-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck "${BINTRAY_DEB_REPO}"
+    # - bash scripts/deploy-rpm-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck "${BINTRAY_RPM_REPO}"
+    # - bash scripts/deploy-maven-snapshots.sh "${BINTRAY_USER}" "${BINTRAY_API_KEY}" rundeck "${BINTRAY_MAVEN_REPO}" "${RUNDECK_BUILD_NUMBER}"
+    # Upload to sonatype
+    - script_block 'publish.maven' 'DRY_RUN=false bash scripts/travis-build.sh publish'
 
   # Stage: fork consolidates all tests into one job.
   # Forks do not have access to encrypted envars so we can't pass artifacts between jobs/stages.
   - stage: fork
     script:
-    - set -o errexit
-    - source scripts/travis-helpers.sh
-    - script_block 'gradle-build' './gradlew clean && ./gradlew build'
-    - script_block 'groovy-test' 'groovy testbuild.groovy -gradle'
-    - script_block 'make' 'make TAG=SNAPSHOT BUILD_NUM=$RUNDECK_BUILD_NUMBER rpm deb'
-    - script_block 'deb-test' 'bash test/test-docker-install-deb.sh'
-    - script_block 'rpm-test' 'bash test/test-docker-install-rpm.sh'
+    - script_block 'build' 'bash scripts/travis-build.sh buildFork'
+    # - script_block 'deb-test' 'bash test/test-docker-install-deb.sh'
+    # - script_block 'rpm-test' 'bash test/test-docker-install-rpm.sh'
     - script_block 'api-test' 'DOCKER_COMPOSE_SPEC=docker-compose-api-mysql.yaml bash test/run-docker-api-tests.sh'
     - script_block 'docker-test' 'bash test/run-docker-tests.sh'
     - script_block 'docker-ssl-test' 'bash test/run-docker-ssl-tests.sh'
     - script_block 'docker-ansible-test' 'bash test/run-docker-ansible-tests.sh'
+    - script_block 'docker-ldap-test' 'bash test/run-docker-ldap-tests.sh'
+    - script_block 'docker-ldap-bind-test' 'DOCKER_COMPOSE_SPEC=docker-compose-ldap-binding-test.yaml bash test/run-docker-ldap-tests.sh'
 
 addons:
   hostname: rdbuild
+  chrome: stable
   apt:
     packages:
     - groovy
@@ -185,6 +204,8 @@ branches:
     - release-2.11
     - prerelease-2.12.0
     - /^v.*/
+    - /^feature\/.*/
+    - /^issue\/.*/
 
 notifications:
   irc:

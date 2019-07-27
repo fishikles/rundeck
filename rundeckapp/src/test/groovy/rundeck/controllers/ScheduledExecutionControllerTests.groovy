@@ -16,7 +16,10 @@
 
 package rundeck.controllers
 
+import com.dtolabs.rundeck.core.common.PluginControlService
 import groovy.mock.interceptor.MockFor
+import rundeck.services.optionvalues.OptionValuesService
+import rundeck.ScheduledExecutionStats
 
 import static org.junit.Assert.*
 
@@ -65,7 +68,7 @@ import javax.servlet.http.HttpServletResponse
 * $Id$
 */
 @TestFor(ScheduledExecutionController)
-@Mock([ScheduledExecution,Option,Workflow,CommandExec,Execution,JobExec, ReferencedExecution])
+@Mock([ScheduledExecution,Option,Workflow,CommandExec,Execution,JobExec, ReferencedExecution, ScheduledExecutionStats])
 class ScheduledExecutionControllerTests  {
     /**
      * utility method to mock a class
@@ -91,126 +94,6 @@ class ScheduledExecutionControllerTests  {
         expected.each {k, v ->
             assertMap(k, value, v)
         }
-    }
-
-    public void testExpandUrlOptionValueSimple() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'monkey', controller.expandUrl(option, '${option.test1.value}', se,[test1:'monkey'])
-    }
-    public void testExpandUrlOptionValueUrl() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'http://some.host/path/a%20monkey', controller.expandUrl(option, 'http://some.host/path/${option.test1.value}', se,[test1:'a monkey'])
-    }
-    public void testExpandUrlOptionValueParam() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'http://some.host/path/?a+monkey', controller.expandUrl(option, 'http://some.host/path/?${option.test1.value}', se,[test1:'a monkey'])
-    }
-    public void testExpandUrlOptionName() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'test1', controller.expandUrl(option, '${option.name}', se)
-    }
-
-    public void testExpandUrlJobName() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'blue', controller.expandUrl(option, '${job.name}', se)
-    }
-
-    public void testExpandUrlJobGroup() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'some%2Fwhere', controller.expandUrl(option, '${job.group}', se)
-    }
-
-    public void testExpandUrlJobDesc() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'a%20job', controller.expandUrl(option, '${job.description}', se)
-    }
-
-    public void testExpandUrlJobDescParam() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals '?a+job', controller.expandUrl(option, '?${job.description}', se)
-    }
-
-    public void testExpandUrlJobProject() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'AProject', controller.expandUrl(option, '${job.project}', se)
-    }
-
-    public void testExpandUrlJobProp_nonexistent() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals '${job.noexist}', controller.expandUrl(option, '${job.noexist}', se)
-    }
-
-    public void testExpandUrlJobMultipleValues() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'http://test/action?name=blue&option=test1&project=AProject',
-            controller.expandUrl(option, 'http://test/action?name=${job.name}&option=${option.name}&project=${job.project}', se)
-
-    }
-
-    public void testExpandUrlJobUsernameAnonymous() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'anonymous', controller.expandUrl(option, '${job.user.name}', se)
-    }
-
-    public void testExpandUrlJobUsername() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        controller.session.user='bob'
-        assertEquals 'bob', controller.expandUrl(option, '${job.user.name}', se)
-    }
-
-    public void testExpandUrlJobRundeckNodename() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'server1', controller.expandUrl(option, '${job.rundeck.nodename}', se)
-    }
-    public void testExpandUrlJobRundeckNodename2() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'server1', controller.expandUrl(option, '${rundeck.nodename}', se)
-    }
-
-    public void testExpandUrlJobRundeckServerUUID() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'xyz', controller.expandUrl(option, '${job.rundeck.serverUUID}', se)
-    }
-
-    public void testExpandUrlJobRundeckServerUUID2() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller)
-        assertEquals 'xyz', controller.expandUrl(option, '${rundeck.serverUUID}', se)
-    }
-    public void testExpandUrlJobRundeckBasedir() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller,false)
-        assertEquals '/a/path', controller.expandUrl(option, '${job.rundeck.basedir}', se,[:],false)
-    }
-
-    public void testExpandUrlJobRundeckBasedir2() {
-        def (Option option, ScheduledExecution se) = setupExpandUrlJob(controller,false)
-        assertEquals '/a/path', controller.expandUrl(option, '${rundeck.basedir}', se,[:],false)
-    }
-
-    protected List setupExpandUrlJob(def controller,boolean ishttp=true) {
-        ScheduledExecution se = new ScheduledExecution(jobName: 'blue', groupPath: 'some/where',
-                description: 'a job', project: 'AProject', argString: '-a b -c d')
-
-        final Option option = new Option(name: 'test1', enforced: false)
-        se.addToOptions(option)
-        se.save()
-        assertNotNull(option.properties)
-        controller.frameworkService = mockWith(FrameworkService) {
-            getFrameworkNodeName() {->
-                'server1'
-            }
-            getServerUUID(1..1) {->
-                'xyz'
-            }
-            if(!ishttp) {
-                getRundeckBase(1..2) { ->
-                    '/a/path'
-                }
-            }
-            getProjectGlobals(1..1){String x->
-                [:]
-            }
-        }
-        [option, se]
     }
 
     public void testSaveBasic() {
@@ -584,6 +467,7 @@ class ScheduledExecutionControllerTests  {
             //try to do update of the ScheduledExecution
             def fwkControl = new MockFor(FrameworkService, true)
         fwkControl.demand.getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
+        fwkControl.demand.getPluginControlService {  }
         fwkControl.demand.getNodeStepPluginDescriptions { [] }
         fwkControl.demand.getStepPluginDescriptions { [] }
         fwkControl.demand.getRundeckFramework {-> return null }
@@ -651,6 +535,7 @@ class ScheduledExecutionControllerTests  {
             //try to do update of the ScheduledExecution
             def fwkControl = new MockFor(FrameworkService, true)
         fwkControl.demand.getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
+        fwkControl.demand.getPluginControlService {  }
         fwkControl.demand.getNodeStepPluginDescriptions { [] }
         fwkControl.demand.getStepPluginDescriptions { [] }
         fwkControl.demand.getRundeckFramework {-> return null }
@@ -1139,6 +1024,13 @@ class ScheduledExecutionControllerTests  {
                 assert proj == se.project
                 assert 'read' in actions
                 assert 'view' in actions
+                true
+            }
+            authorizeProjectResourceAll(1) { ctx, res, actions, proj ->
+                assert res == [type: 'resource', kind: 'event']
+                assert proj == se.project
+                assert 'read' in actions
+
                 true
             }
         }
@@ -2064,7 +1956,21 @@ class ScheduledExecutionControllerTests  {
         def sec = new ScheduledExecutionController()
         if (true) {//test basic copy action
 
-            def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah2')
+            def se = new ScheduledExecution(
+                    uuid: 'testUUID',
+                    jobName: 'monkey1', project: 'testProject', description: 'blah2',
+                    groupPath: 'testgroup',
+                    workflow: new Workflow(
+                            keepgoing: true,
+                            commands: [
+                                    new CommandExec([
+                                            adhocRemoteString: 'test buddy',
+                                            argString: '-delay 12 -monkey cheese -particle'
+                                    ])
+                            ]
+                    )
+            )
+
             se.save()
 
             assertNotNull se.id
@@ -2076,8 +1982,9 @@ class ScheduledExecutionControllerTests  {
             fwkControl.demand.authorizeProjectJobAll { framework, resource, actions, project -> return true }
             fwkControl.demand.getNodeStepPluginDescriptions { [] }
             fwkControl.demand.getStepPluginDescriptions { [] }
-            fwkControl.demand.getProjectGlobals { [:] }
+            fwkControl.demand.getPluginControlService { null }
             fwkControl.demand.projectNames { [] }
+            fwkControl.demand.getProjectGlobals { [:] }
             fwkControl.demand.getRundeckFramework {-> return null }
             fwkControl.demand.projects { return [] }
             fwkControl.demand.getRundeckFramework {-> return null }
@@ -2198,6 +2105,100 @@ class ScheduledExecutionControllerTests  {
         assertEquals(null,model.optionordering)
         assertEquals(null,model.nodesSelectedByDefault)
         assertEquals([:],model.remoteOptionData)
+    }
+    public void testShowWithOptionValuesPlugin() {
+        def sec = controller
+
+        def se = new ScheduledExecution(
+                uuid: 'testUUID',
+                jobName: 'test1',
+                project: 'project1',
+                groupPath: 'testgroup',
+                workflow: new Workflow(
+                        keepgoing: true,
+                        commands: [
+                                new CommandExec([
+                                        adhocRemoteString: 'test buddy',
+                                        argString: '-delay 12 -monkey cheese -particle'
+                                ])
+                        ]
+                ),
+                options: [
+                        new Option(name: 'optvals', optionValuesPluginType: 'test', required: true, enforced: false)
+                ]
+        )
+
+        se.save()
+
+
+        assertNotNull se.id
+
+        //try to do update of the ScheduledExecution
+        sec.frameworkService = mockWith(FrameworkService){
+
+            getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
+            getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
+            authorizeProjectJobAny { AuthContext authContext, ScheduledExecution job, Collection actions, String project ->
+                return true
+            }
+            isClusterModeEnabled{-> false }
+            authResourceForProject{p->null}
+            authorizeApplicationResourceAny(2..2){AuthContext authContext, Map resource, List actions->false}
+            projectNames { _ -> return []}
+            projects { return [] }
+            authorizeProjectResourceAll { framework, resource, actions, project -> return true }
+            authorizeProjectJobAny { framework, resource, actions, project -> return true }
+            getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
+            getRundeckFramework {-> return [getFrameworkNodeName:{->'fwnode'}] }
+            getNodeStepPluginDescriptions { [] }
+            getStepPluginDescriptions { [] }
+        }
+        sec.optionValuesService = mockWith(OptionValuesService) {
+            getOptions { project, plugin -> return [[name:"opt1",value:"o1"]] }
+        }
+
+        sec.scheduledExecutionService = mockWith(ScheduledExecutionService){
+            getByIDorUUID { id -> return se }
+            nextExecutionTime { job -> null }
+            getWorkflowStrategyPluginDescriptions{->[]}
+            userAuthorizedForJob { user, schedexec, framework -> return true }
+        }
+
+        sec.notificationService = mockWith(NotificationService){
+            listNotificationPlugins() {->
+                []
+            }
+        }
+        sec.orchestratorPluginService=mockWith(OrchestratorPluginService){
+            getOrchestratorPlugins(){->null}
+        }
+        sec.pluginService = mockWith(PluginService) {
+            listPlugins(){[]}
+        }
+        def params = [id: se.id.toString(),project:'project1']
+        sec.params.putAll(params)
+        def model = sec.show()
+        assertNull sec.response.redirectedUrl
+        assertNotNull model
+        assertNotNull(model.scheduledExecution)
+        assertNull(model.selectedNodes)
+        assertEquals('fwnode',model.localNodeName)
+        assertEquals(null,model.nodefilter)
+        assertEquals(null,model.nodesetvariables)
+        assertEquals(null,model.failedNodes)
+        assertEquals(null,model.nodesetempty)
+        assertEquals(null,model.nodes)
+        assertEquals(null,model.selectedNodes)
+        assertEquals(null,model.grouptags)
+        assertEquals(null,model.selectedoptsmap)
+        assertEquals([:],model.dependentoptions)
+        assertEquals([:],model.optiondependencies)
+        assertEquals(['optvals'],model.optionordering)
+        assertEquals(null,model.nodesSelectedByDefault)
+        assertEquals([optvals:[optionDependencies:null,optionDeps:null,localOption:true]],model.remoteOptionData)
+        assertEquals(1,se.options[0].valuesFromPlugin.size())
+        assertEquals('opt1',se.options[0].valuesFromPlugin[0].name)
+        assertEquals('o1',se.options[0].valuesFromPlugin[0].value)
     }
     /**
      * model contains node dispatch target nodes information
@@ -2387,7 +2388,7 @@ class ScheduledExecutionControllerTests  {
         assertNull sec.response.redirectedUrl
         assertNotNull model
         assertNotNull(model.scheduledExecution)
-        assertEquals("", model.selectedNodes)
+        assertEquals([], model.selectedNodes)
         assertEquals('fwnode',model.localNodeName)
         assertEquals('name: nodea,nodeb',model.nodefilter)
         assertEquals(null,model.nodesetvariables)
@@ -2724,7 +2725,7 @@ class ScheduledExecutionControllerTests  {
         assertEquals(null,model.failedNodes)
         assertEquals(null,model.nodesetempty)
         assertEquals(testNodeSet.nodes,model.nodes)
-        assertEquals('nodea',model.selectedNodes)
+        assertEquals(['nodea'],model.selectedNodes)
         assertEquals([:],model.grouptags)
         assertEquals(null,model.selectedoptsmap)
         assertEquals(true,model.nodesSelectedByDefault)
@@ -2766,7 +2767,7 @@ class ScheduledExecutionControllerTests  {
         mock2.demand.parseUploadedFile { input,format ->
             [jobset:[expectedJob]]
         }
-        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx ->
+        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx, validateJobref ->
             assert jobset==[expectedJob]
             [
                     jobs: [expectedJob],
@@ -2856,7 +2857,7 @@ class ScheduledExecutionControllerTests  {
         mock2.demand.parseUploadedFile { input,format ->
             [jobset:[expectedJob]]
         }
-        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx ->
+        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx, validateJobref ->
             assert jobset==[expectedJob]
             [
                     jobs: [expectedJob],
@@ -2931,7 +2932,7 @@ class ScheduledExecutionControllerTests  {
         mock2.demand.parseUploadedFile { input,format ->
             [jobset: [expectedJob]]
         }
-        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx ->
+        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx, validateJobref ->
             assertEquals('BProject', jobset[0].project)
             [
                     jobs: [expectedJob],
@@ -3016,7 +3017,7 @@ class ScheduledExecutionControllerTests  {
         mock2.demand.parseUploadedFile { input, format ->
             [jobset: [expectedJob]]
         }
-        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx ->
+        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx, validateJobref ->
             [
                     jobs: [expectedJob],
                     jobsi: [scheduledExecution: expectedJob, entrynum: 0],
@@ -3072,11 +3073,11 @@ class ScheduledExecutionControllerTests  {
         Option opt = job.options.iterator().next()
         assertEquals "testopt", opt.name
         assertEquals "`ls -t1 /* | head -n1`", opt.defaultValue
-        assertNotNull opt.values
-        assertEquals 3, opt.values.size()
-        assertTrue opt.values.contains("a")
-        assertTrue opt.values.contains("b")
-        assertTrue opt.values.contains("c")
+        assertNotNull opt.optionValues
+        assertEquals 3, opt.optionValues.size()
+        assertTrue opt.optionValues.contains("a")
+        assertTrue opt.optionValues.contains("b")
+        assertTrue opt.optionValues.contains("c")
     }
 
     public void testUploadOptions2() {
@@ -3111,7 +3112,7 @@ class ScheduledExecutionControllerTests  {
         mock2.demand.parseUploadedFile { input, format ->
             [jobset: [expectedJob]]
         }
-        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx ->
+        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx, validateJobref ->
             [
                     jobs: [expectedJob],
                     jobsi: [scheduledExecution: expectedJob, entrynum: 0],
@@ -3168,11 +3169,11 @@ class ScheduledExecutionControllerTests  {
         Option opt = job.options.iterator().next()
         assertEquals "testopt", opt.name
         assertEquals "`ls -t1 /* | head -n1`", opt.defaultValue
-        assertNotNull opt.values
-        assertEquals 3, opt.values.size()
-        assertTrue opt.values.contains("a")
-        assertTrue opt.values.contains("b")
-        assertTrue opt.values.contains("c")
+        assertNotNull opt.optionValues
+        assertEquals 3, opt.optionValues.size()
+        assertTrue opt.optionValues.contains("a")
+        assertTrue opt.optionValues.contains("b")
+        assertTrue opt.optionValues.contains("c")
     }
 
     public void testUploadShouldCreate() {
@@ -3207,7 +3208,7 @@ class ScheduledExecutionControllerTests  {
         mock2.demand.parseUploadedFile { input, format ->
             [jobset: [expectedJob]]
         }
-        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx ->
+        mock2.demand.loadJobs { jobset, dupeOption, uuidOption, changeinfo, authctx, validateJobref ->
             [
                     jobs: [expectedJob],
                     jobsi: [scheduledExecution: expectedJob, entrynum: 0],
@@ -3340,5 +3341,47 @@ class ScheduledExecutionControllerTests  {
         sec.uploadPost()
         def result = sec.modelAndView.model
         assertEquals "No file was uploaded.", sec.request.getAttribute('message')
+    }
+
+    public void testCreateExcludeInactivePlugins() {
+        def sec = new ScheduledExecutionController()
+        def se = new ScheduledExecution(jobName: 'monkey1', project: 'testProject', description: 'blah2')
+        se.save()
+        assertNotNull se.id
+        def plgControlSrv = new MockFor(PluginControlService)
+        plgControlSrv.demand.isDisabledPlugin {name, type-> name=='test' }
+        plgControlSrv.demand.isDisabledPlugin {name, type-> name=='test' }
+        //try to do update of the ScheduledExecution
+        def fwkControl = new MockFor(FrameworkService, true)
+        fwkControl.demand.getAuthContextForSubjectAndProject { subject,proj -> testUserAndRolesContext() }
+        fwkControl.demand.authorizeProjectResourceAll { framework, resource, actions, project -> return true }
+        fwkControl.demand.getPluginControlService{proj->plgControlSrv.proxyInstance()}
+        fwkControl.demand.getNodeStepPluginDescriptions { [[name:'test'],[name:'test2']] }
+        fwkControl.demand.getStepPluginDescriptions { [] }
+        fwkControl.demand.getProjectGlobals { [:] }
+        fwkControl.demand.projectNames { [] }
+        sec.frameworkService = fwkControl.proxyInstance()
+        def seServiceControl = new MockFor(ScheduledExecutionService, true)
+        sec.scheduledExecutionService = mockWith(ScheduledExecutionService){
+            getWorkflowStrategyPluginDescriptions{->[]}
+            getTimeZones{->[]}
+        }
+        def oServiceControl = new MockFor(OrchestratorPluginService, true)
+        oServiceControl.demand.listDescriptions{[]}
+        sec.orchestratorPluginService = oServiceControl.proxyInstance()
+        def pControl = new MockFor(NotificationService)
+        pControl.demand.listNotificationPlugins() {->
+            []
+        }
+        sec.notificationService = pControl.proxyInstance()
+        sec.pluginService = mockWith(PluginService){
+            listPlugins(){[]}
+        }
+        def params = [id: se.id.toString()]
+        sec.params.putAll(params)
+        def ret = sec.create()
+        assertNotNull(ret)
+        assertNotNull(ret.nodeStepDescriptions)
+        assertEquals(1,ret.nodeStepDescriptions.size())
     }
 }

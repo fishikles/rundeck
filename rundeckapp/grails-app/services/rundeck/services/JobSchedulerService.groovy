@@ -43,6 +43,16 @@ class JobSchedulerService implements JobScheduleManager {
     boolean updateScheduleOwner(final String name, final String group, final Map data) {
         return rundeckJobScheduleManager.updateScheduleOwner(name, group, data)
     }
+
+    @Override
+    String determineExecNode(String name, String group, Map data, String project) {
+        return rundeckJobScheduleManager.determineExecNode(name, group, data, project)
+    }
+
+    @Override
+    List<String> getDeadMembers(String uuid) {
+        return rundeckJobScheduleManager.getDeadMembers(uuid);
+    }
 }
 
 /**
@@ -52,6 +62,10 @@ class QuartzJobScheduleManager implements JobScheduleManager {
 
     @Autowired
     def Scheduler quartzScheduler
+
+    @Autowired
+    def FrameworkService frameworkService
+
 
     @Override
     void deleteJobSchedule(final String name, final String group) {
@@ -102,5 +116,15 @@ class QuartzJobScheduleManager implements JobScheduleManager {
     @Override
     boolean updateScheduleOwner(final String name, final String group, final Map data) {
         return true
+    }
+
+    @Override
+    String determineExecNode(String name, String group, Map data, String project) {
+        return frameworkService.serverUUID
+    }
+
+    @Override
+    List<String> getDeadMembers(String uuid) {
+        return null;
     }
 }

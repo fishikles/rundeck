@@ -50,20 +50,22 @@
         <g:message code="scheduledExecution.property.notified.label.text" />
     </div>
     <div class="col-sm-10">
-        <label class="radio-inline">
-            <g:radio value="false" name="notified"
-                     checked="${!(notifications || params.notified=='true')}"
-                     id="notifiedFalse"/>
-            <g:message code="no" />
-        </label>
-
-        <label class="radio-inline">
-            <g:radio name="notified" value="true"
-                     checked="${notifications || params.notified == 'true'}"
-                     id="notifiedTrue"/>
+      <div class="radio radio-inline">
+        <g:radio value="false" name="notified"
+                 checked="${!(notifications || params.notified=='true')}"
+                 id="notifiedFalse"/>
+         <label for="notifiedFalse">
+             <g:message code="no" />
+         </label>
+      </div>
+      <div class="radio radio-inline">
+        <g:radio name="notified" value="true"
+                 checked="${notifications || params.notified == 'true'}"
+                 id="notifiedTrue"/>
+        <label for="notifiedTrue">
             <g:message code="yes" />
         </label>
-
+      </div>
         <g:javascript>
             <wdgt:eventHandlerJS for="notifiedTrue" state="unempty">
                 <wdgt:action visible="true" targetSelector=".notifyFields.form-group"/>
@@ -82,6 +84,7 @@
             triggerEmailRecipientsName: ScheduledExecutionController.NOTIFY_SUCCESS_RECIPIENTS,
             triggerEmailSubjectName: ScheduledExecutionController.NOTIFY_SUCCESS_SUBJECT,
             triggerEmailAttachName: ScheduledExecutionController.NOTIFY_SUCCESS_ATTACH,
+            triggerEmailAttachTypeName: ScheduledExecutionController.NOTIFY_SUCCESS_ATTACH_TYPE,
             triggerUrlCheckboxName: ScheduledExecutionController.NOTIFY_ONSUCCESS_URL,
             triggerUrlFieldName: ScheduledExecutionController.NOTIFY_SUCCESS_URL,
             isEmail:isSuccess,
@@ -101,6 +104,7 @@
                   triggerEmailRecipientsName: ScheduledExecutionController.NOTIFY_FAILURE_RECIPIENTS,
                   triggerEmailSubjectName: ScheduledExecutionController.NOTIFY_FAILURE_SUBJECT,
                   triggerEmailAttachName: ScheduledExecutionController.NOTIFY_FAILURE_ATTACH,
+                  triggerEmailAttachTypeName: ScheduledExecutionController.NOTIFY_FAILURE_ATTACH_TYPE,
                   triggerUrlCheckboxName: ScheduledExecutionController.NOTIFY_ONFAILURE_URL,
                   triggerUrlFieldName: ScheduledExecutionController.NOTIFY_FAILURE_URL,
                   isEmail: isFailure,
@@ -155,6 +159,7 @@
                   triggerEmailRecipientsName: ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_RECIPIENTS,
                   triggerEmailSubjectName: ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_SUBJECT,
                   triggerEmailAttachName: ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_ATTACH,
+                  triggerEmailAttachTypeName: ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_ATTACH_TYPE,
                   triggerUrlCheckboxName: ScheduledExecutionController.NOTIFY_ONRETRYABLEFAILURE_URL,
                   triggerUrlFieldName: ScheduledExecutionController.NOTIFY_RETRYABLEFAILURE_URL,
                   isEmail: isRetryableFailure,

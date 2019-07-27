@@ -246,7 +246,9 @@ public class ExecutionItemFactory {
                 null,
                 false,
                 false,
-                null
+                null,
+                false,
+                false
         );
     }
 
@@ -277,7 +279,9 @@ public class ExecutionItemFactory {
             final String project,
             final Boolean failOnDisable,
             final Boolean importOptions,
-            final String uuid
+            final String uuid,
+            final Boolean useName,
+            final Boolean ignoreNotifications
     )
     {
 
@@ -297,7 +301,9 @@ public class ExecutionItemFactory {
                 project,
                 failOnDisable,
                 importOptions,
-                uuid
+                uuid,
+                useName,
+                ignoreNotifications
         );
     }
 
@@ -626,6 +632,8 @@ public class ExecutionItemFactory {
         private final Boolean failOnDisable;
         private final Boolean importOptions;
         private final String uuid;
+        private final Boolean useName;
+        private final Boolean ignoreNotifications;
 
         public JobReferenceItem(
                 final String label,
@@ -643,7 +651,9 @@ public class ExecutionItemFactory {
                 final String project,
                 final Boolean failOnDisable,
                 final Boolean importOptions,
-                final String uuid
+                final String uuid,
+                final Boolean useName,
+                final Boolean ignoreNotifications
         )
         {
             this.label = label;
@@ -662,6 +672,8 @@ public class ExecutionItemFactory {
             this.failOnDisable = failOnDisable;
             this.importOptions = importOptions;
             this.uuid = uuid;
+            this.useName = useName;
+            this.ignoreNotifications = ignoreNotifications;
         }
 
         @Override
@@ -734,6 +746,12 @@ public class ExecutionItemFactory {
         public Boolean isImportOptions(){return importOptions;}
 
         public String getUuid(){return uuid;}
+
+        public Boolean isUseName(){return useName;}
+
+        public Boolean isIgnoreNotifications(){
+            return ignoreNotifications;
+        }
 
 
         @Override

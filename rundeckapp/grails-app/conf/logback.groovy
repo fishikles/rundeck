@@ -15,10 +15,10 @@ appender('STDOUT', TrueConsoleAppender) {
         charset = Charset.forName('UTF-8')
 
         pattern =
-                '%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} ' + // Date
+                '[%clr(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint}] ' + // Date
                         '%clr(%5p) ' + // Log level
+                        '%clr(%logger{0}){cyan} ' + // Logger
                         '%clr(---){faint} %clr([%15.15t]){faint} ' + // Thread
-                        '%clr(%-40.40logger{39}){cyan} %clr(:){faint} ' + // Logger
                         '%m%n%wex' // Message
     }
 }
@@ -38,6 +38,13 @@ appender('STDOUT', TrueConsoleAppender) {
 }
 ['org.hibernate.cache.ehcache','org.springframework.beans.GenericTypeAwarePropertyDescriptor'].each {
     logger it, ERROR, ['STDOUT'], false
+}
+
+// Provides critical visibility into jaas config issues
+['com.dtolabs.rundeck.jetty.jaas',
+ 'grails.plugin.springsecurity.web.authentication.GrailsUsernamePasswordAuthenticationFilter',
+ 'org.rundeck.jaas'].each {
+    logger it, DEBUG, ['STDOUT'], false
 }
 
 logger "rundeckapp.BootStrap", INFO, ["STDOUT"], false
@@ -85,4 +92,4 @@ if (Environment.isDevelopmentMode()) {
         }
     }
 }
-root(ERROR, ['STDOUT'])
+root(WARN, ['STDOUT'])

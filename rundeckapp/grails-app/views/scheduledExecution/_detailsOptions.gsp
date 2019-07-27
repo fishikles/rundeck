@@ -15,7 +15,7 @@
   --}%
 <%--
     _detailsOptions.gsp
-    
+
     Author: Greg Schueler <a href="mailto:greg@dtosolutions.com">greg@dtosolutions.com</a>
     Created: Aug 2, 2010 1:50:19 PM
     $Id$
@@ -24,7 +24,7 @@
 <g:set var="rkey" value="${g.rkey()}"/>
 
     <g:if test="${edit}">
-        <div id="optundoredo" class="undoredocontrols">
+        <div id="optundoredo" class="undoredocontrols" style="margin-top:1em">
             <g:render template="/common/undoRedoControls" model="[key: 'opts']"/>
         </div>
     </g:if>
@@ -66,7 +66,7 @@
     </div>
 
     <g:if test="${edit}">
-        <div id="optnewbutton" style="margin:5px 0 15px 0; ">
+        <div id="optnewbutton" style="margin:10px 0; ">
             <span class="btn btn-default btn-sm ready" onclick="_optaddnew();" title="Add a new Option">
                 <b class="glyphicon glyphicon-plus"></b>
                 Add an option

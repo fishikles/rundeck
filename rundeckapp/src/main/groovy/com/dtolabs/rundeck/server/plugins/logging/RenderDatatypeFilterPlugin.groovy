@@ -123,6 +123,22 @@ class RenderDatatypeFilterPlugin implements LogFilterPlugin {
     )
     @SelectLabels(values = ['JSON', 'Java Properties', 'CSV', 'HTML', 'Markdown'])
     String datatype = null
+
+    @PluginProperty(
+            title = "Table striped",
+            description = '''Display the rows striped.''',
+            required = false
+    )
+    boolean striped = false
+
+    @PluginProperty(
+            title = "Sanitize HTML",
+            description = '''HTML that is emitted is run through the HTML sanitizer to remove potentially unsafe tags. Note: Unsanitized HTML must be enabled in the framework and project properties before this setting will take effect.''',
+            defaultValue = "true",
+            required = false
+    )
+    boolean sanitizeHtml = true
+
     private StringBuilder buffer;
 
     @Override
@@ -170,12 +186,22 @@ class RenderDatatypeFilterPlugin implements LogFilterPlugin {
             if (buffer.length() > 0) {
                 buffer.append("\n")
             }
+
+            def meta = [
+                    'content-data-type': SYNONYMS[datatype.toLowerCase()] ?: datatype
+            ]
+
+            if(striped){
+                meta << ['content-meta:css-class' : 'table-striped']
+            }
+            if(!sanitizeHtml) {
+                meta << ['content-meta:no-strip' : 'true']
+            }
+
             context.log(
                     2,
                     buffer.toString(),
-                    [
-                            'content-data-type': SYNONYMS[datatype.toLowerCase()] ?: datatype
-                    ]
+                    meta
             )
         }
         buffer = new StringBuilder()

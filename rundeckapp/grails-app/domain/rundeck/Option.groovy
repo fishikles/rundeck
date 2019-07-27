@@ -16,6 +16,9 @@
 
 package rundeck
 
+import com.dtolabs.rundeck.app.api.marshall.CollectionElement
+import com.dtolabs.rundeck.plugins.option.OptionValue
+import com.dtolabs.rundeck.util.StringNumericSort
 import com.fasterxml.jackson.core.JsonParseException
 import com.fasterxml.jackson.databind.ObjectMapper
 
@@ -40,6 +43,7 @@ import java.util.regex.Pattern
 
 public class Option implements Comparable{
 
+    static final String DEFAULT_DELIMITER =','
 
     ScheduledExecution scheduledExecution
     String name
@@ -61,6 +65,7 @@ public class Option implements Comparable{
     URL valuesUrlLong
     String regex
     String valuesList
+    String valuesListDelimiter
     Boolean multivalued
     String delimiter
     Boolean secureInput
@@ -68,9 +73,15 @@ public class Option implements Comparable{
     String optionType
     String configData
     Boolean multivalueAllSelected
+    String optionValuesPluginType
+    List<OptionValue> valuesFromPlugin
+    Boolean hidden
+    Boolean sortValues
+    List<String> optionValues
+
 
     static belongsTo=[scheduledExecution:ScheduledExecution]
-    static transients = ['valuesList', 'realValuesUrl', 'configMap', 'typeFile']
+    static transients = ['realValuesUrl', 'configMap', 'typeFile','valuesFromPlugin','optionValues']
 
     static constraints={
         name(nullable:false,blank:false,matches: '[a-zA-Z_0-9.-]+')
@@ -95,6 +106,11 @@ public class Option implements Comparable{
         configData(nullable: true)
         multivalueAllSelected(nullable: true)
         label(nullable: true)
+        optionValuesPluginType(nullable: true)
+        hidden(nullable: true)
+        valuesList(nullable: true)
+        valuesListDelimiter(nullable: true)
+        sortValues(nullable: true)
     }
 
 
@@ -130,6 +146,7 @@ public class Option implements Comparable{
         regex type: 'text'
         optionType type: 'text'
         configData type: 'text'
+        valuesList type: 'text'
 //        values type: 'string'//, lazy: false
     }
     /**
@@ -175,8 +192,9 @@ public class Option implements Comparable{
         if(regex){
             map.regex=regex
         }
-        if(values){
-            map.values=values as List
+        if(getOptionValues()){
+            map.values=getOptionValues()
+            map.valuesListDelimiter = valuesListDelimiter?:','
         }
         if(multivalued){
             map.multivalued=multivalued
@@ -190,6 +208,12 @@ public class Option implements Comparable{
         }
         if(secureExposed && secureInput){
             map.valueExposed= secureExposed
+        }
+        if(optionValuesPluginType) {
+            map.optionValuesPluginType = optionValuesPluginType
+        }
+        if(hidden){
+            map.hidden = hidden
         }
         return map
     }
@@ -233,6 +257,13 @@ public class Option implements Comparable{
         }
         if(data.values){
             opt.values=data.values instanceof Collection?new TreeSet(data.values):new TreeSet([data.values])
+            if(data.valuesListDelimiter){
+                opt.valuesListDelimiter=data.valuesListDelimiter
+            }else{
+                opt.valuesListDelimiter=DEFAULT_DELIMITER
+            }
+            opt.valuesList = opt.produceValuesList()
+            opt.values = null
         }
         if(data.multivalued){
             opt.multivalued=true
@@ -251,6 +282,12 @@ public class Option implements Comparable{
         }else{
             opt.secureExposed=false
         }
+        if(data.optionValuesPluginType) {
+            opt.optionValuesPluginType = data.optionValuesPluginType
+        }
+        if(data.hidden){
+            opt.hidden = data.hidden
+        }
         return opt
     }
     /**
@@ -258,7 +295,12 @@ public class Option implements Comparable{
      */
     public String produceValuesList(){
         if(values){
-            return values.join(",")
+            if(valuesListDelimiter==null){
+                valuesListDelimiter = DEFAULT_DELIMITER
+            }
+            valuesList = values.join(valuesListDelimiter)
+            values = null
+            return valuesList
         }else{
             return ''
         }
@@ -293,10 +335,15 @@ public class Option implements Comparable{
      */
     void convertValuesList(){
         if(valuesList!=null){
-            def x=new TreeSet()
-            x.addAll(valuesList.split(",").collect{it.trim()}.grep{it} as List)
-            values=x
-            valuesList=null
+            if(valuesListDelimiter == null){
+                valuesListDelimiter=DEFAULT_DELIMITER
+            }
+            optionValues=new ArrayList()
+            optionValues.addAll(valuesList.split(Pattern.quote(valuesListDelimiter)).collect{it.trim()}.grep{it}.unique() as List)
+
+            if(optionValues && sortValues){
+                sortValuesList()
+            }
         }
     }
 
@@ -338,8 +385,8 @@ public class Option implements Comparable{
         ['name', 'description', 'defaultValue', 'defaultStoragePath', 'sortIndex', 'enforced', 'required', 'isDate',
          'dateFormat', 'values', 'valuesList', 'valuesUrl', 'valuesUrlLong', 'regex', 'multivalued',
          'multivalueAllSelected', 'label',
-         'delimiter',
-         'secureInput', 'secureExposed', 'optionType', 'configData'].
+         'delimiter', 'optionValuesPluginType',
+         'secureInput', 'secureExposed', 'optionType', 'configData', 'hidden','sortValues','valuesListDelimiter'].
                 each { k ->
             opt[k]=this[k]
         }
@@ -347,6 +394,31 @@ public class Option implements Comparable{
             opt.valuesList=this.produceValuesList()
         }
         return opt
+    }
+
+
+    void sortValuesList(){
+        def numericValues = optionValues.findAll { it.isNumber() }.collect {it.toDouble()}
+        if(numericValues.size()==optionValues.size()){
+            def stringNumericList= optionValues.findAll { it.isNumber() }.collect {new StringNumericSort(it, it.toDouble())}
+            StringNumericSort.sortNumeric(stringNumericList)
+            optionValues = stringNumericList.collect{it.strValue}
+        }else{
+            optionValues = optionValues.sort()
+        }
+    }
+
+    List<String> getOptionValues(){
+        if(optionValues==null){
+            if(values !=null && values.size()> 0 && valuesList == null){
+                produceValuesList()
+                convertValuesList()
+                values = null
+            }else if(valuesList){
+                convertValuesList()
+            }
+        }
+        optionValues
     }
 
     public String toString ( ) {
@@ -368,8 +440,10 @@ public class Option implements Comparable{
         ", secureInput='" + secureInput + '\'' +
         ", secureExposed='" + secureExposed + '\'' +
         ", delimiter='" + delimiter + '\'' +
+               ', optionValuesPluginType=' + optionValuesPluginType + '\'' +
                 ", optionType='" + optionType + '\'' +
                 ", configData='" + configData + '\'' +
+        ", hidden='" + '\'' +
         '}' ;
     }
 

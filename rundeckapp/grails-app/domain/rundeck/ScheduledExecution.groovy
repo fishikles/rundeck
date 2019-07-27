@@ -70,6 +70,9 @@ class ScheduledExecution extends ExecutionContext {
     String notifyAvgDurationUrl
     String notifyRetryableFailureRecipients
     String notifyRetryableFailureUrl
+    String notifySuccessAttach
+    String notifyFailureAttach
+    String notifyRetryableFailureAttach
     Boolean multipleExecutions = false
     Orchestrator orchestrator
     String serverNodeUUID
@@ -92,7 +95,7 @@ class ScheduledExecution extends ExecutionContext {
     static transients = ['userRoles','adhocExecutionType','notifySuccessRecipients','notifyFailureRecipients',
                          'notifyStartRecipients', 'notifySuccessUrl', 'notifyFailureUrl', 'notifyStartUrl',
                          'crontabString','averageDuration','notifyAvgDurationRecipients','notifyAvgDurationUrl',
-                         'notifyRetryableFailureRecipients','notifyRetryableFailureUrl']
+                         'notifyRetryableFailureRecipients','notifyRetryableFailureUrl','notifyFailureAttach','notifySuccessAttach','notifyRetryableFailureAttach']
 
     static constraints = {
         project(nullable:false, blank: false, matches: FrameworkResource.VALID_RESOURCE_NAME_REGEX)
@@ -140,7 +143,7 @@ class ScheduledExecution extends ExecutionContext {
         uuid(unique: true, nullable:true, blank:false, matches: FrameworkResource.VALID_RESOURCE_NAME_REGEX)
         orchestrator(nullable:true)
         multipleExecutions(nullable: true)
-        serverNodeUUID(size: 36..36, blank: true, nullable: true, validator: { val, obj ->
+        serverNodeUUID(maxSize: 36, size: 36..36, blank: true, nullable: true, validator: { val, obj ->
             if (null == val) return true;
             try { return null != UUID.fromString(val) } catch (IllegalArgumentException e) {
                 return false
@@ -199,9 +202,10 @@ class ScheduledExecution extends ExecutionContext {
         retry(type: 'text')
         retryDelay(type: 'text')
         notifyAvgDurationThreshold(type: 'text')
+        serverNodeUUID(type: 'string')
 
         DomainIndexHelper.generate(delegate) {
-            index '_IDX_SCHEDULED_EXECUTION_PROJECT', ['project']
+            index 'JOB_IDX_PROJECT', ['project']
         }
     }
 
@@ -333,6 +337,14 @@ class ScheduledExecution extends ExecutionContext {
             }else{
                 map.nodefilters.filter = asFilter()
             }
+
+            if(this.filterExclude){
+                map.nodefilters.filterExclude = this.filterExclude
+
+                if(this.excludeFilterUncheck){
+                    map.excludeFilterUncheck = true
+                }
+            }
         }
         if(notifications){
             map.notification=[:]
@@ -379,6 +391,7 @@ class ScheduledExecution extends ExecutionContext {
         se.scheduleEnabled = data['scheduleEnabled'] == null || data['scheduleEnabled']
         se.executionEnabled = data['executionEnabled'] == null || data['executionEnabled']
         se.nodeFilterEditable = data['nodeFilterEditable'] == null || data['nodeFilterEditable']
+        se.excludeFilterUncheck = data.excludeFilterUncheck?data.excludeFilterUncheck:false
         
         se.loglevel=data.loglevel?data.loglevel:'INFO'
 
@@ -451,7 +464,7 @@ class ScheduledExecution extends ExecutionContext {
                     se.year = '*'
                 }
                 if(data.schedule.dayofmonth && data.schedule.dayofmonth instanceof Map
-                        && null !=data.schedule.dayofmonth.day){
+                        && null !=data.schedule.dayofmonth.day && '?' !=data.schedule.dayofmonth.day){
                     se.dayOfMonth = data.schedule.dayofmonth.day
                     se.dayOfWeek = '?'
                 }else if(data.schedule.weekday && data.schedule.weekday instanceof Map
@@ -513,6 +526,10 @@ class ScheduledExecution extends ExecutionContext {
                     }
                 }
                 se.filter = asFilter(map)
+            }
+
+            if(data.nodefilters.filterExclude){
+                se.filterExclude= data.nodefilters.filterExclude
             }
         }
         if(data.notification){
@@ -1048,8 +1065,10 @@ class ScheduledExecution extends ExecutionContext {
     }
 
     long getAverageDuration() {
-        if (totalTime && execCount) {
-            return Math.floor(totalTime / execCount)
+        def stats = getStats()
+        def statsContent= stats?.getContentMap()
+        if (statsContent && statsContent.totalTime && statsContent.execCount) {
+            return Math.floor(statsContent.totalTime / statsContent.execCount)
         }
         return 0;
     }
@@ -1100,5 +1119,46 @@ class ScheduledExecution extends ExecutionContext {
         }
     }
 
+    ScheduledExecutionStats getStats() {
+        def stats
+        if(this.id) {
+            stats = ScheduledExecutionStats.findBySe(this)
+            if (!stats) {
+                def content = [execCount   : this.execCount,
+                               totalTime   : this.totalTime,
+                               refExecCount: this.refExecCount]
+
+                stats = new ScheduledExecutionStats(se: this, contentMap: content).save()
+            }
+        }
+        stats
+    }
+
+    Long getRefExecCountStats(){
+        def stats = this.getStats()
+        def statsContent= stats?.getContentMap()
+        if (statsContent?.refExecCount) {
+            return statsContent.refExecCount
+        }
+        return 0;
+    }
+
+    Long getTotalTimeStats(){
+        def stats = this.getStats()
+        def statsContent= stats?.getContentMap()
+        if (statsContent?.totalTime) {
+            return statsContent.totalTime
+        }
+        return 0;
+    }
+
+    Long getExecCountStats(){
+        def stats = this.getStats()
+        def statsContent= stats?.getContentMap()
+        if (statsContent?.execCount) {
+            return statsContent.execCount
+        }
+        return 0;
+    }
 }
 
