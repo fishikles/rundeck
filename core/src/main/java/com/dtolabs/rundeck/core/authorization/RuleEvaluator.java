@@ -39,9 +39,10 @@ import java.util.stream.Collectors;
  * Evaluate ACL requests over a set of rules
  */
 public class RuleEvaluator implements Authorization, AclRuleSetSource {
-    private final static Logger logger = Logger.getLogger(RuleEvaluator.class);
+    private static Logger logger = Logger.getLogger(RuleEvaluator.class);
     final private AclRuleSet rules;
-    final private AclRuleSetSource source;;
+    final private AclRuleSetSource source;
+    private boolean isMulti = false;
 
     private RuleEvaluator(final AclRuleSetSource ruleSetSource) {
         this.source = ruleSetSource;
@@ -117,31 +118,55 @@ public class RuleEvaluator implements Authorization, AclRuleSetSource {
             return false;
         }
 
+        if(rule.isBy()) {
+            if (subject.getUsername() != null && rule.getUsername() != null) {
 
-        if (subject.getUsername() != null && rule.getUsername() != null) {
-
-            if (subject.getUsername().equals(rule.getUsername())
-                || matchesPattern(subject.getUsername(), rule.getUsername())
-                    ) {
-                return true;
-            } else if (rule.getUsername() != null) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug(rule.toString() + ": username not matched: " + rule.getUsername());
+                if (subject.getUsername().equals(rule.getUsername())
+                        || matchesPattern(subject.getUsername(), rule.getUsername())
+                        ) {
+                    return true;
+                } else if (rule.getUsername() != null) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug(rule.toString() + ": username not matched: " + rule.getUsername());
+                    }
                 }
             }
-        }
 
 
-        if (subject.getGroups().size() > 0) {
-            // no username matched, check groups.
-            if (subject.getGroups().contains(rule.getGroup())
-                || matchesAnyPatterns(subject.getGroups(), rule.getGroup())) {
-                return true;
-            } else if (subject.getGroups().size() > 0) {
-                if (logger.isDebugEnabled()) {
-                    logger.debug(rule.toString() + ": group not matched: " + rule.getGroup());
+            if (subject.getGroups().size() > 0) {
+                // no username matched, check groups.
+                if (subject.getGroups().contains(rule.getGroup())
+                        || matchesAnyPatterns(subject.getGroups(), rule.getGroup())) {
+                    return true;
+                } else if (subject.getGroups().size() > 0) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug(rule.toString() + ": group not matched: " + rule.getGroup());
+                    }
                 }
             }
+        }else { //notBy acl
+            if (subject.getUsername() != null && rule.getUsername() != null) {
+                if (subject.getUsername().equals(rule.getUsername())
+                        || matchesPattern(subject.getUsername(), rule.getUsername())
+                        ) {
+                    return false;
+                } else if (rule.getUsername() != null) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug(rule.toString() + ": username not excluded: " + rule.getUsername());
+                    }
+                }
+            }
+            if (subject.getGroups().size() > 0) {
+                if (subject.getGroups().contains(rule.getGroup())
+                        || matchesAnyPatterns(subject.getGroups(), rule.getGroup())) {
+                    return false;
+                } else if (subject.getGroups().size() > 0) {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug(rule.toString() + ": group not excluded: " + rule.getGroup());
+                    }
+                }
+            }
+            return true;
         }
         return false;
     }
@@ -212,15 +237,29 @@ public class RuleEvaluator implements Authorization, AclRuleSetSource {
         Set<Decision> decisions = new HashSet<Decision>();
         long duration = 0;
         List<AclRule> matchedRules = narrowContext(getRuleSet(), subjectFrom(subject), environment);
+        boolean anyAuthorized = false;
         for (Map<String, String> resource : resources) {
             for (String action : actions) {
-                final Decision decision = evaluate(
+                final Decision decision = internalEvaluate(
                         resource, subject, action, environment, matchedRules
                 );
                 duration += decision.evaluationDuration();
                 decisions.add(decision);
+                if(decision.isAuthorized()){
+                    anyAuthorized = true;
+                }
             }
         }
+        if(!isMulti) {
+            for (Decision decision : decisions) {
+                if (!anyAuthorized) {
+                    logger.warn(MessageFormat.format("Evaluating {0} ({1}ms)", decision, decision.evaluationDuration()));
+                } else {
+                    logger.info(MessageFormat.format("Evaluating {0} ({1}ms)", decision, decision.evaluationDuration()));
+                }
+            }
+        }
+
         return decisions;
     }
 
@@ -234,7 +273,11 @@ public class RuleEvaluator implements Authorization, AclRuleSetSource {
     {
 
         Decision decision = internalEvaluate(resource, subject, action, environment, matchedRules);
-        logger.info(MessageFormat.format("Evaluating {0} ({1}ms)", decision, decision.evaluationDuration()));
+        if(decision.isAuthorized()) {
+            logger.info(MessageFormat.format("Evaluating {0} ({1}ms)", decision, decision.evaluationDuration()));
+        }else{
+            logger.warn(MessageFormat.format("Evaluating {0} ({1}ms)", decision, decision.evaluationDuration()));
+        }
         return decision;
     }
 
@@ -830,5 +873,9 @@ public class RuleEvaluator implements Authorization, AclRuleSetSource {
                 return pred.test(value);
             }
         });
+    }
+
+    public void setMulti(){
+        isMulti = true;
     }
 }

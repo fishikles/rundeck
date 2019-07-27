@@ -1,120 +1,84 @@
-Release 3.0.0-alpha2
+Release 3.0.21
 ===========
 
-Date: 2018-06-14
+Date: 2019-04-24
 
-Name: <span style="color: aquamarine"><span class="glyphicon glyphicon-apple"></span> "jalapeño popper aquamarine apple"</span>
+Name: <span style="color: pink"><span class="glyphicon glyphicon-plane"></span> "jalapeño popper pink plane"</span>
 
-## Prerelease Notes
+## Notes
 
-**This is a prerelease** of Rundeck 3.0. There have been a number of changes and we are asking for community feedback
-on this version. If you find a bug or regression, please file an issue at <https://github.com/rundeck/rundeck/issues>.
-
-We are publishing the snapshot documentation for Rundeck 3.0 at this URL: <http://rundeck.org/3.0.x-SNAPSHOT/>. Currently the Upgrading Guide is *not* updated with specific Rundeck 3.0 information, so please read the notes below.
-
-The largest change is that we've upgraded the underlying web-app framework to Grails 3. This affects some aspects of install and configuration:
-
-Install:
-
-* The "launcher jar" for Rundeck 2 is gone (long live the launcher jar). However the .war file now operates the same way. Just use the .war in the same way as the previous launcher jar, or deploy it as a webapp.
-
-Configuration:
-
-* The `web.xml` file is no longer available. If you were modifying this after install before, let us know how/for what reason. (Typically modifying session timeout or auth constraints). Also, please see Authentication Changes below.
-* If using Mysql/other DBs which require a JDBC driver, be sure to specify it explicitly in the rundeck-config file, e.g. `dataSource.driverClassName=com.mysql.jdbc.Driver`
-* If you update and get an error about Log4j configuration, add a line to your rundeck-config file: `rundeck.log4j.config.file=/.../server/config/log4j.properties` and specify the correct path to a log4j.properties file.
-
-Authentication Changes:
-
-* We no longer rely on "container-based" security/authentication (i.e. web.xml auth constraints, coupled with Jetty/Tomcat authentication setup.)
-	We now use "Spring Security" for Grails, which moves the authentication checks into Rundeck itself.
-	This enables SSO, Oauth, and other types of authentication which was difficult/impossible to implement before.
-* The default JAAS authentication method still works, so existing JAAS based configuration should operate as expected.
-* Pre-authentication modes should work as they did before.
-* SSO integration: *documentation TBD*
-
-Thanks:
-
-A lot of work went into the Grails 3 upgrade, many thanks especially to:
-
-* Alberto Hormazabal
-* Stephen Joyner
-
-👏👏👏
-
-## Upgrading
-
-For the most part, Rundeck 3.0 is drop-in compatible with existing Rundeck 2.11 installations.
-
-We recommend doing a fresh install of 3.0.0-alpha1 and copying your Jobs/projects into it for testing.
-
-If you are upgrading in-place, *Be sure to backup import data/configs before upgrading.*
-
-If you are using the rundeck Launcher jar, replace it with the `.war` artifact, which can be renamed with a `.jar` extension if needed.
-
-See the *Configuration* notes above.
-
-
-## Additional Enhancements since Rundeck 2.11:
-
-* Limit multiple executions of a job
-* Encrypt passwords stored in configuration files
+Bug fixes
 
 ## Contributors
 
-* Alberto Hormazabal (ahormazabal)
-* Davy Gabard
-* Davy Gabard (Kaldor37)
-* GitHub (web-flow)
+* Carlos Eduardo Roriz Franco
 * Greg Schueler (gschueler)
+* Greg Zapp (ProTip)
 * Jaime Tobar (jtobard)
-* Jocelyn Thode
-* Joseph Price (PriceChild)
+* Jesse Marple (jessemarple)
 * Luis Toledo (ltamaster)
-* Martin (martinbydefault)
-* OmriShiv
-* ProTip
-* Romain LEON (PeekLeon)
-* Stephen Joyner
+* Stefan Kirrmann (kirrmann)
 * Stephen Joyner (sjrd218)
 * carlos (carlosrfranco)
-* scollector65
 
 ## Bug Reporters
 
-* Kaldor37
-* Nomekrax
-* PriceChild
-* ahormazabal
+* G3NSVRV
+* JesusRo
+* ProTip
+* benruset
+* carlosrfranco
+* ckaiser79
+* dabest1
+* fgutierrezz
 * gschueler
-* jquick
+* hs-hub-world
+* jessemarple
+* jplassnibatt
 * jtobard
-* kino71
+* kirrmann
 * ltamaster
+* marcoc610
 * sebastianbello
 * sjrd218
-* turlubullu
-* wcliff
 
 ## Issues
 
-[Milestone 3.0.0](https://github.com/rundeck/rundeck/milestone/76)
+[Milestone 3.0.21](https://github.com/rundeck/rundeck/milestone/106)
 
-* [Git plugin setup page does not preserve current values in Select fields](https://github.com/rundeck/rundeck/issues/3483)
-* [Set a max file size of 25mb configurable](https://github.com/rundeck/rundeck/pull/3477)
-* [Error 400 importing projects over 128kb](https://github.com/rundeck/rundeck/issues/3476)
-* [Security Advisory: Zip Slip directory traversal vulnerability](https://github.com/rundeck/rundeck/issues/3471)
-* [ACL for uuid](https://github.com/rundeck/rundeck/pull/3456)
-* [Addresses issue #2062 ](https://github.com/rundeck/rundeck/pull/3432)
-* [Fixed various french translations](https://github.com/rundeck/rundeck/pull/3430)
-* [importOptions missplaced in yaml/xml export.](https://github.com/rundeck/rundeck/issues/3429)
-* [Create project via API with invalid project name does not return error](https://github.com/rundeck/rundeck/issues/3423)
-* [BUG: Job Options not appearing in Duplicated Jobs](https://github.com/rundeck/rundeck/issues/3421)
-* [Using variable in Storage path job options](https://github.com/rundeck/rundeck/pull/3420)
-* [duplicate jobs page doesn't show options ](https://github.com/rundeck/rundeck/issues/3384)
-* [rundeck access log contains "\[Ljava.lang.String;" instead of project](https://github.com/rundeck/rundeck/issues/3379)
-* [Grails 3 Update](https://github.com/rundeck/rundeck/pull/3290)
-* [Using variable in Storage path job options](https://github.com/rundeck/rundeck/issues/2092)
-* [Encrypt passwords stored in configuration files](https://github.com/rundeck/rundeck/issues/2062)
-* [Limit Multiple Executions](https://github.com/rundeck/rundeck/issues/1387)
-* [i18n Update: node filter help](https://github.com/rundeck/rundeck/pull/3383)
+* [Add docker configuration extension information](https://github.com/rundeck/rundeck/pull/4751)
+* [Fix: job exclude filter doesn't work for scheduled jobs](https://github.com/rundeck/rundeck/pull/4750)
+* [Fix new project / edit node source flow](https://github.com/rundeck/rundeck/pull/4746)
+* [Fixes StaticHostKeyChecking when using password for git plugin via ssh](https://github.com/rundeck/rundeck/pull/4745)
+* [Logout enhancements.](https://github.com/rundeck/rundeck/pull/4743)
+* [new project flow: after creation, should go to updated nodes config page](https://github.com/rundeck/rundeck/issues/4741)
+* [Fix: project does not exist error](https://github.com/rundeck/rundeck/pull/4735)
+* [Fix style on job form for Notification plugins, and webhook field](https://github.com/rundeck/rundeck/pull/4733)
+* [Fix: mask plugin password properties in project config](https://github.com/rundeck/rundeck/pull/4724)
+* [new version of python winrm plugin](https://github.com/rundeck/rundeck/pull/4722)
+* [Default java plugin metadata](https://github.com/rundeck/rundeck/pull/4719)
+* [node Config UI updates](https://github.com/rundeck/rundeck/pull/4714)
+* [Add server.session.timeout to docker remco template](https://github.com/rundeck/rundeck/pull/4712)
+* [Bug/3514/help popover not showing all content](https://github.com/rundeck/rundeck/pull/4709)
+* [Task/update location of job name group button](https://github.com/rundeck/rundeck/pull/4708)
+* [User group plugin type](https://github.com/rundeck/rundeck/pull/4701)
+* [Flow Control fail flag right behavior](https://github.com/rundeck/rundeck/pull/4700)
+* [Exclude Filter Ignored for Scheduled Job but not Adhoc Run](https://github.com/rundeck/rundeck/issues/4699)
+* [Add configuration for hiding the user/password login fields when SSO ](https://github.com/rundeck/rundeck/pull/4697)
+* [Retry Failed Nodes doesn't bring in failed nodes if Change the Target Nodes option was used](https://github.com/rundeck/rundeck/pull/4689)
+* [compatibility for old versions of email notification (issue #4643)](https://github.com/rundeck/rundeck/pull/4688)
+* [Api endpoint for job forecast](https://github.com/rundeck/rundeck/pull/4682)
+* [Allow multi-page selections on job exections history report #4416](https://github.com/rundeck/rundeck/pull/4673)
+* [Fix problem deleting SCM configured project.](https://github.com/rundeck/rundeck/pull/4670)
+* [Use Password field type for password encryptor input](https://github.com/rundeck/rundeck/pull/4669)
+* ["Attached as file to Email" should be default when upgrading Rundeck](https://github.com/rundeck/rundeck/issues/4643)
+* [Retry Failed Nodes doesn't bring in failed nodes if Change the Target Nodes option was used](https://github.com/rundeck/rundeck/issues/4639)
+* [Make password utilitlity field Value To Encrypt to type password](https://github.com/rundeck/rundeck/issues/4624)
+* [Cannot delete SCM configured project after upgrade to Rundeck ver 3.0.17](https://github.com/rundeck/rundeck/issues/4623)
+* [Job with Flow Control with Halt option enabled doesn't work when called by another job.  ](https://github.com/rundeck/rundeck/issues/4605)
+* [Configurable Job Reference Validation](https://github.com/rundeck/rundeck/pull/4583)
+* [Old look&feel on notification plugins](https://github.com/rundeck/rundeck/issues/4530)
+* [Configurable Job Reference Validation](https://github.com/rundeck/rundeck/issues/4527)
+* [UI Error: "Project does not exist" when working on another project](https://github.com/rundeck/rundeck/issues/3905)
+* ["help balloon" is not showing all its content](https://github.com/rundeck/rundeck/issues/3514)
+* [Enable API endpoint for Schedule Forecast](https://github.com/rundeck/rundeck/issues/3469)

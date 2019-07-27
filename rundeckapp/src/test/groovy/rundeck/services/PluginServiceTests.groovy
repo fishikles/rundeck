@@ -17,6 +17,7 @@
 package rundeck.services
 
 import com.dtolabs.rundeck.core.common.Framework
+import com.dtolabs.rundeck.core.common.IFramework
 import com.dtolabs.rundeck.core.execution.service.ProviderLoaderException
 import com.dtolabs.rundeck.core.plugins.CloseableProvider
 import com.dtolabs.rundeck.core.plugins.PluggableProviderService
@@ -28,10 +29,10 @@ import com.dtolabs.rundeck.core.plugins.configuration.Description
 import com.dtolabs.rundeck.core.plugins.configuration.PropertyResolver
 import com.dtolabs.rundeck.core.plugins.configuration.PropertyScope
 import com.dtolabs.rundeck.core.utils.IPropertyLookup
-import com.dtolabs.rundeck.server.plugins.ConfiguredPlugin
-import com.dtolabs.rundeck.server.plugins.DescribedPlugin
-import com.dtolabs.rundeck.server.plugins.PluginRegistry
-import com.dtolabs.rundeck.server.plugins.ValidatedPlugin
+import com.dtolabs.rundeck.core.plugins.ConfiguredPlugin
+import com.dtolabs.rundeck.core.plugins.DescribedPlugin
+import com.dtolabs.rundeck.core.plugins.PluginRegistry
+import com.dtolabs.rundeck.core.plugins.ValidatedPlugin
 import grails.test.*
 import spock.lang.Specification
 
@@ -66,29 +67,10 @@ class PluginServiceTests extends Specification {
             return null
         }
 
-        @Override
-        boolean isValidProviderClass(Class clazz) {
-            return false
-        }
-
-        @Override
-        boolean isScriptPluggable() {
-            return false
-        }
 
         @Override
         List<ProviderIdent> listProviders() {
             return null
-        }
-
-        String createProviderInstance(Class clazz, String name) {
-
-            return null;
-        }
-
-        String createScriptProviderInstance(ScriptPluginProvider name) {
-
-            return null;
         }
 
         String providerOfType(String name){
@@ -137,7 +119,7 @@ class PluginServiceTests extends Specification {
 
         @Override
         <T> ConfiguredPlugin<T> configurePluginByName(String name, PluggableProviderService<T> service,
-        Framework framework, String project, Map instanceConfiguration) {
+                                                      IFramework framework, String project, Map instanceConfiguration) {
             cpWithFrameworkCalled=true
             return new ConfiguredPlugin<T>( plugin,  extraConfiguration)
         }
@@ -161,6 +143,19 @@ class PluginServiceTests extends Specification {
         }
         def <T> PluggableProviderService<T> createPluggableService(final Class<T> type) {
             throw new IllegalArgumentException("test not implemented")
+        }
+
+        @Override
+        def <T> boolean isFrameworkDependentPluginType(final Class<T> type) {
+            throw new IllegalArgumentException(" not implemented")
+        }
+
+        @Override
+        def <T> PluggableProviderService<T> getFrameworkDependentPluggableService(
+                final Class<T> type,
+                final Framework framework
+        ) {
+            throw new IllegalArgumentException(" not implemented")
         }
 
         @Override
@@ -189,7 +184,7 @@ class PluginServiceTests extends Specification {
         }
 
         @Override
-        ValidatedPlugin validatePluginByName(String name, PluggableProviderService service, Framework framework, String project, Map instanceConfiguration) {
+        ValidatedPlugin validatePluginByName(String name, PluggableProviderService service, IFramework framework, String project, Map instanceConfiguration) {
             validateWithFrameworkCalled=true
             return pluginValidation
         }

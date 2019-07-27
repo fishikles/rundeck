@@ -17,28 +17,31 @@
 /**
  * State of workflow, step oriented
  */
-var FlowState = Class.create({
-    executionId:null,
-    selectedOutputStatusId:null,
-    targetElement:null,
-    retry:5,
-    loadUrl:null,
-    loadUrlParamsBase: {},
-    loadUrlParams:null,
-    outputUrl:null,
-    shouldUpdate:false,
-    updateCompleted:false,
-    updateRunning:false,
-    timer:null,
-    selectedElem:null,
-    selectedFollowControl:null,
-    reloadInterval:3000,
-    updaters:null,
-    initialize: function (eid, elem, params) {
-        this.executionId = eid;
-        this.targetElement = elem;
-        Object.extend(this, params);
-    },
+var FlowState =  function(eid, elem, params){
+    this.executionId = eid;
+    this.targetElement = elem;
+    Object.assign(this, {
+        executionId: null,
+        selectedOutputStatusId: null,
+        targetElement: null,
+        retry: 5,
+        loadUrl: null,
+        loadUrlParamsBase: {},
+        loadUrlParams: null,
+        outputUrl: null,
+        shouldUpdate: false,
+        updateCompleted: false,
+        updateRunning: false,
+        timer: null,
+        selectedElem: null,
+        selectedFollowControl: null,
+        reloadInterval: 3000,
+        updaters: null,
+    })
+
+    Object.assign(this, params);
+    Object.assign(this,{
+
     withOrWithoutMatch: function (root, selector, func, wofunc) {
         var elem = $(root).down(selector);
         if (elem && null!=func && typeof(func)=='function') {
@@ -166,11 +169,11 @@ var FlowState = Class.create({
         var state = this;
         var params= {nodename: node};
         if(stepctx){
-            Object.extend(params,{stepctx:stepctx});
+            jQuery.extend(params,{stepctx:stepctx});
         }
         var ctrl = new FollowControl(null,null,{
             parentElement:targetElement,
-            extraParams:'&'+Object.toQueryString(params),
+            extraParams:'&'+_genUrlQuery(params),
             appLinks:{tailExecutionOutput:this.outputUrl},
             finishedExecutionAction:false
         });
@@ -224,7 +227,7 @@ var FlowState = Class.create({
             this.retry--;
         }else if(data.error){
             this.retry=-1;
-            this.shouldUpdate=false;
+            this.shouldUpdate=!json.completed;
         }
         if(!data.error){
             this.updateState(json);
@@ -276,4 +279,5 @@ var FlowState = Class.create({
         }
         this.updaters.push( updater);
     }
-});
+})
+}

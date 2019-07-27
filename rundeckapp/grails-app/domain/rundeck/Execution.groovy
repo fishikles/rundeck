@@ -89,7 +89,7 @@ class Execution extends ExecutionContext {
         failedNodeList(nullable:true, blank:true)
         succeededNodeList(nullable:true, blank:true)
         abortedby(nullable:true, blank:true)
-        serverNodeUUID(size:36..36, blank: true, nullable: true, validator: { val, obj ->
+        serverNodeUUID(maxSize: 36, size:36..36, blank: true, nullable: true, validator: { val, obj ->
             if (null == val) return true;
             try { return null!= UUID.fromString(val) } catch (IllegalArgumentException e) {
                 return false
@@ -107,6 +107,7 @@ class Execution extends ExecutionContext {
         retryDelay(nullable:true)
         successOnEmptyNodeFilter(nullable: true)
         retryOriginalId(nullable: true)
+        excludeFilterUncheck(nullable: true)
     }
 
     static mapping = {
@@ -136,12 +137,14 @@ class Execution extends ExecutionContext {
         timeout( type: 'text')
         retry( type: 'text')
         userRoleList(type: 'text')
+        serverNodeUUID(type: 'string')
 
         DomainIndexHelper.generate(delegate) {
             index 'EXEC_IDX_1', ['id', 'project', 'dateCompleted']
             index 'EXEC_IDX_2', ['dateStarted', 'status']
             index 'EXEC_IDX_3', ['project', 'dateCompleted']
             index 'EXEC_IDX_4', ['dateCompleted', 'scheduledExecution']
+            index 'EXEC_IDX_5', ['scheduledExecution', 'status']
         }
     }
 
@@ -154,6 +157,11 @@ class Execution extends ExecutionContext {
         }
         withProject{ project ->
             eq 'project', project
+        }
+        lastExecutionByUser{ user ->
+            eq 'user', user
+            maxResults 1
+            order 'dateStarted', 'desc'
         }
 	}
 
@@ -207,9 +215,21 @@ class Execution extends ExecutionContext {
     }
 
     // various utility methods helpful to the presentation layer
+
+    /**
+     * Returns the duration of the execution in amount of milliseconds.
+     * @return
+     */
+    def Long durationAsLong() {
+        if (!dateStarted || !dateCompleted) return null
+        return (dateCompleted.getTime() - dateStarted.getTime())
+    }
+
     def String durationAsString() {
-        if (!dateStarted || !dateCompleted) return ""
-        def dms = dateCompleted.getTime() - dateStarted.getTime()
+
+        def dms = durationAsLong()
+        if(!dms) return ""
+
         def duration
         if (dms < 1000) {
             duration = "0s"
@@ -282,6 +302,9 @@ class Execution extends ExecutionContext {
             if (nodeRankAttribute) {
                 map.nodefilters.dispatch.rankAttribute = nodeRankAttribute
             }
+            if(this.filterExclude && this.excludeFilterUncheck){
+                map.nodefilters.dispatch.excludeFilterUncheck = this.excludeFilterUncheck
+            }
             map.nodefilters.dispatch.rankOrder = (null == nodeRankOrderAscending || nodeRankOrderAscending) ? 'ascending' : 'descending'
             if (filter) {
                 map.nodefilters.filter = filter
@@ -350,6 +373,7 @@ class Execution extends ExecutionContext {
             if (data.nodefilters.dispatch?.containsKey('rankOrder')) {
                 exec.nodeRankOrderAscending = data.nodefilters.dispatch.rankOrder == 'ascending'
             }
+            exec.excludeFilterUncheck = data.nodefilters.excludeFilterUncheck ? data.nodefilters.excludeFilterUncheck : false
             if (data.nodefilters.filter) {
                 exec.doNodedispatch = true
                 exec.filter = data.nodefilters.filter

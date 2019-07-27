@@ -191,7 +191,7 @@ function WorkflowStepInfo(multiworkflow,stepctx,data){
     self.parentStepInfo=ko.computed(function(){
         var ctx=self.stepctxArray();
         if(ctx.length>1) {
-            var parent = ctx.slice(0, -1).join('/');
+            var parent = RDWorkflow.createContextId(ctx.slice(0, -1));
             return self.multiworkflow.getStepInfoForStepctx(parent);
         }
         return null;
@@ -574,7 +574,7 @@ function MultiWorkflow(workflowInfo,data){
         var ndx = RDWorkflow.workflowIndexForContextId(lastctx);
 
         //get the parent workflow, and then fill in the current step
-        self.getParentJobStepInfoForStepctx(ctx.join('/'),function(parentjobinfo){
+        self.getParentJobStepInfoForStepctx(RDWorkflow.createContextId(ctx),function(parentjobinfo){
             //TODO: currently node summary state context string does not indicate errorHandler, but
             //in case it does in the future, force use of correct job info
             var iseh=ctx.length>0?RDWorkflow.isErrorhandlerForContextId(ctx[ctx.length-1]):false;
@@ -915,7 +915,17 @@ function NodeFlowViewModel(workflow, outputUrl, nodeStateUpdateUrl, multiworkflo
     self.endTime=ko.observable();
     self.executionId = ko.observable(data.executionId);
     self.outputScrollOffset=0;
-    self.activeTab=ko.observable("summary");
+    self.activeTab = ko.observable("nodes")
+    self.tabs = ko.observableArray(data.tabs || [
+        {id: 'nodes', title: 'Nodes'},
+        {id: 'output', title: 'Log Output'}
+    ])
+    self.humanizedDisplay=ko.observable(false);
+    self.logoutput = ko.observable(data.logoutput);
+    self.activeTabData = ko.pureComputed(function () {
+        const theTab = self.activeTab()
+        return self.tabs().find((e) => e.id === theTab)
+    })
     self.scheduled = ko.pureComputed(function () {
         return self.executionState() === 'SCHEDULED';
     });
@@ -1119,12 +1129,12 @@ function NodeFlowViewModel(workflow, outputUrl, nodeStateUpdateUrl, multiworkflo
         targetElement=targetElement[0];
         var params = {nodename: node};
         if (stepctx) {
-            Object.extend(params, {stepctx: stepctx});
+            jQuery.extend(params, {stepctx: stepctx});
         }
         var ctrl = new FollowControl(null, null, {
             parentElement: targetElement,
             showClusterExecWarning: false,
-            extraParams: '&' + Object.toQueryString(params),
+            extraParams: '&' + _genUrlQuery(params),
             appLinks: {tailExecutionOutput: self.followOutputUrl},
             finishedExecutionAction: false,
             autoscroll:false,
@@ -1352,8 +1362,7 @@ function NodeFlowViewModel(workflow, outputUrl, nodeStateUpdateUrl, multiworkflo
         });
     };
     self.formatTimeAtDate=function(text){
-        //TODO: fix incorrect endTime/startTime format: it is not actually UTC time
-        return MomentUtil.formatTimeAtDateUTC(text);
+        return MomentUtil.formatTimeAtDate(text);
     };
     self.formatDurationHumanize=function(ms){
         return MomentUtil.formatDurationHumanize(ms);
@@ -1369,7 +1378,19 @@ function NodeFlowViewModel(workflow, outputUrl, nodeStateUpdateUrl, multiworkflo
     self.findNode=function(node){
         return self.nodeIndex[node];
     };
-
+    self.toggleHumanizedDisplay=function(){
+        self.humanizedDisplay(!self.humanizedDisplay());
+    }
+    self.startTimeAgo=ko.pureComputed(function () {
+        let time=self.startTime()
+        if(!time) return
+        return moment(self.startTime()).fromNow();
+    })
+    self.endTimeAgo=ko.pureComputed(function () {
+        let time=self.endTime()
+        if(!time) return
+        return moment(self.endTime()).fromNow();
+    })
 
     self.execDurationSimple = ko.pureComputed(function () {
         return MomentUtil.formatDurationSimple(self.execDuration());
@@ -1377,6 +1398,11 @@ function NodeFlowViewModel(workflow, outputUrl, nodeStateUpdateUrl, multiworkflo
     self.execDurationHumanized = ko.pureComputed(function () {
         return MomentUtil.formatDurationHumanize(self.execDuration());
     });
+    self.execDurationDisplay=ko.pureComputed(function () {
+        const human=self.humanizedDisplay();
+        if(human) return MomentUtil.formatDurationHumanize(self.execDuration());
+        return MomentUtil.formatDurationSimple(self.execDuration());
+    })
     self.followFlowState = function (flowState,followNodes) {
         "use strict";
         flowState.addUpdater({

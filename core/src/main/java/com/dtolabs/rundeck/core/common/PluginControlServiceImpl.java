@@ -2,9 +2,7 @@ package com.dtolabs.rundeck.core.common;
 
 import com.dtolabs.rundeck.core.plugins.configuration.Description;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -13,15 +11,19 @@ import java.util.stream.Collectors;
  */
 public class PluginControlServiceImpl implements PluginControlService {
 
-    private final Framework framework;
-    private final String    projectName;
+    public static final String DISABLED_PLUGINS = "disabled.plugins";
+    private HashSet<String> disabledPlugins;
+    private final IFramework framework;
+    private final String project;
 
-    private PluginControlServiceImpl(Framework framework, String project) {
+    private PluginControlServiceImpl(IFramework framework, String project) {
         this.framework = framework;
-        this.projectName = project;
+        this.project = project;
     }
 
-    public static PluginControlService forProject(Framework framework, String project) {
+
+    public static PluginControlService forProject(IFramework framework, String project) {
+
         return new PluginControlServiceImpl(framework, project);
     }
 
@@ -30,9 +32,29 @@ public class PluginControlServiceImpl implements PluginControlService {
      */
     @Override
     public List<String> listDisabledPlugins() {
-        String disabledPlugins = framework.getProjectProperty(projectName, "disabled.plugins");
-        if (disabledPlugins != null && !disabledPlugins.trim().isEmpty()) {
-            return Arrays.asList(disabledPlugins.split("\\s*,\\s*"));
+        return new ArrayList<>(getDisabledPlugins());
+    }
+
+    @Override
+    public Set<String> getDisabledPlugins() {
+        if (null == disabledPlugins) {
+            synchronized (this) {
+                if (null == disabledPlugins) {
+                    IRundeckProject frameworkProject = framework.getFrameworkProjectMgr().getFrameworkProject(project);
+                    String config =
+                            frameworkProject.hasProperty(DISABLED_PLUGINS)
+                            ? frameworkProject.getProperty(DISABLED_PLUGINS)
+                            : null;
+                    disabledPlugins = new HashSet<>(parseConfig(config));
+                }
+            }
+        }
+        return disabledPlugins;
+    }
+
+    private static List<String> parseConfig(final String pluginConfig) {
+        if (pluginConfig != null && !pluginConfig.trim().isEmpty()) {
+            return Arrays.asList(pluginConfig.split("\\s*,\\s*"));
         }
         return new ArrayList<>();
     }
@@ -47,7 +69,7 @@ public class PluginControlServiceImpl implements PluginControlService {
         List<Description> plugins,
         final String serviceName
     ) {
-        List<String> strings = listDisabledPlugins();
+        Set<String> strings = getDisabledPlugins();
         return plugins
             .stream()
             .filter(description -> !strings.contains(serviceName + ":" + description.getName()))
@@ -62,7 +84,7 @@ public class PluginControlServiceImpl implements PluginControlService {
     public Predicate<String> enabledPredicateForService(
         final String serviceName
     ) {
-        List<String> strings = listDisabledPlugins();
+        Set<String> strings = getDisabledPlugins();
         return name -> !strings.contains(serviceName + ":" + name);
     }
     /**
@@ -83,10 +105,7 @@ public class PluginControlServiceImpl implements PluginControlService {
      */
     @Override
     public boolean isDisabledPlugin(String pluginName, final String serviceName) {
-
-        List<String> disabledPluginsList = listDisabledPlugins();
-        return disabledPluginsList.contains(serviceName + ":" + pluginName);
-
+        return getDisabledPlugins().contains(serviceName + ":" + pluginName);
     }
 
     /**

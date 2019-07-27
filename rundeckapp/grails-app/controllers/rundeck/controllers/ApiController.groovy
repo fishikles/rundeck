@@ -20,6 +20,8 @@ import com.dtolabs.rundeck.app.api.tokens.ListTokens
 import com.dtolabs.rundeck.app.api.tokens.RemoveExpiredTokens
 import com.dtolabs.rundeck.app.api.tokens.Token
 import com.dtolabs.rundeck.core.authorization.AuthContext
+import com.dtolabs.rundeck.core.extension.ApplicationExtension
+import grails.web.mapping.LinkGenerator
 import org.rundeck.util.Sizes
 import rundeck.AuthToken
 
@@ -39,6 +41,7 @@ class ApiController extends ControllerBase{
     def apiService
     def userService
     def configurationService
+    LinkGenerator grailsLinkGenerator
 
     static allowedMethods = [
             apiTokenList         : ['GET'],
@@ -64,6 +67,76 @@ class ApiController extends ControllerBase{
                         status: HttpServletResponse.SC_BAD_REQUEST
                 ]
         )
+    }
+
+    /**
+     * /api/25/metrics/* forwards to /metrics/* path if enabled
+     * @param name
+     * @return
+     */
+    def apiMetrics(String name) {
+        if (!apiService.requireVersion(request, response, ApiVersions.V25)) {
+            return
+        }
+
+        AuthContext authContext = frameworkService.getAuthContextForSubject(session.subject)
+        if (!frameworkService.authorizeApplicationResource(
+            authContext,
+            AuthConstants.RESOURCE_TYPE_SYSTEM,
+            AuthConstants.ACTION_READ
+        )) {
+            return apiService.renderErrorFormat(
+                response,
+                [
+                    status: HttpServletResponse.SC_FORBIDDEN,
+                    code  : 'api.error.item.unauthorized',
+                    args  : ['Read System Metrics', 'Rundeck', ""],
+                    format: 'json'
+                ]
+            )
+        }
+        def names = ['metrics', 'ping', 'threads', 'healthcheck']
+        def globalEnabled=configurationService.getBoolean("metrics.enabled", true) &&
+                          configurationService.getBoolean("metrics.api.enabled", true)
+        def enabled =
+            names.collectEntries { mname ->
+                [mname,
+                 globalEnabled && configurationService.getBoolean("metrics.api.${mname}.enabled", true)
+                ]
+            }
+        if (!name) {
+            //list enabled endpoints
+            return respond(
+                [
+                    '_links':
+                        enabled.findAll { it.value }.collectEntries {
+                            [
+                                it.key,
+                                [
+                                    href: grailsLinkGenerator.link(uri: "/api/${ApiVersions.API_CURRENT_VERSION}/metrics/$it.key", absolute: true)
+                                ]
+                            ]
+                        }
+                ]
+                ,
+                formats: ['json']
+            )
+        }
+        if (!enabled[name]) {
+            return apiService.renderErrorFormat(
+                response,
+                [
+                    format: 'json',
+                    code  : 'api.error.invalid.request',
+                    args  : [
+                        request.forwardURI,
+                    ],
+                    status: HttpServletResponse.SC_NOT_FOUND
+                ]
+            )
+        }
+        def servletPath = configurationService.getString('metrics.servletUrlPattern', '/metrics/*')
+        forward(uri: servletPath.replace('/*', "/$name"))
     }
 
     /**
@@ -113,10 +186,10 @@ class ApiController extends ControllerBase{
             response.contentType='text/plain'
             response.outputStream.withWriter('UTF-8') { w ->
                 grailsApplication.config.feature?.incubator?.each { k, v ->
-                    w << "${k}:${v in [true, 'true']}\n"
+                    appendOutput(response, "${k}:${v in [true, 'true']}\n")
                 }
             }
-            response.outputStream.close()
+            flush(response)
         }
     }
     /**
@@ -337,7 +410,7 @@ class ApiController extends ControllerBase{
     /**
      * /api/1/system/info: display stats and info about the server
      */
-    def apiSystemInfo={
+    def apiSystemInfo(){
         if (!apiService.requireApi(request, response)) {
             return
         }
@@ -364,15 +437,22 @@ class ApiController extends ControllerBase{
         Date startupDate = new Date(nowDate.getTime()-durationTime)
         int threadActiveCount=Thread.activeCount()
         boolean executionModeActive=configurationService.executionModeActive
-        def metricsJsonUrl = createLink(uri: '/metrics/metrics?pretty=true',absolute: true)
-        def metricsThreadDumpUrl = createLink(uri: '/metrics/threads',absolute: true)
-        def metricsHealthcheckUrl = createLink(uri: '/metrics/healthcheck',absolute: true)
+
+        def metricsJsonUrl = grailsLinkGenerator.link(uri: "/api/${ApiVersions.API_CURRENT_VERSION}/metrics/metrics?pretty=true", absolute: true)
+        def metricsThreadDumpUrl = grailsLinkGenerator.link(uri: "/api/${ApiVersions.API_CURRENT_VERSION}/metrics/threads", absolute: true)
+        def metricsHealthcheckUrl = grailsLinkGenerator.link(uri: "/api/${ApiVersions.API_CURRENT_VERSION}/metrics/healthcheck", absolute: true)
+        def metricsPingUrl = grailsLinkGenerator.link(uri: "/api/${ApiVersions.API_CURRENT_VERSION}/metrics/ping", absolute: true)
+
         if (request.api_version < ApiVersions.V14 && !(response.format in ['all','xml'])) {
             return apiService.renderErrorXml(response,[
                     status:HttpServletResponse.SC_UNSUPPORTED_MEDIA_TYPE,
                     code: 'api.error.item.unsupported-format',
                     args: [response.format]
             ])
+        }
+        def extMeta = [:]
+        ServiceLoader.load(ApplicationExtension).each {
+            extMeta[it.name] = it.infoMetadata
         }
         withFormat{
             xml{
@@ -389,6 +469,7 @@ class ApiController extends ControllerBase{
                         rundeck{
                             version(appVersion)
                             build(grailsApplication.metadata['build.ident'])
+                            buildGit(grailsApplication.metadata['build.core.git.description'])
                             node(nodeName)
                             base(servletContext.getAttribute("RDECK_BASE"))
                             apiversion(ApiVersions.API_CURRENT_VERSION)
@@ -434,6 +515,18 @@ class ApiController extends ControllerBase{
                         metrics(href:metricsJsonUrl,contentType:'application/json')
                         threadDump(href:metricsThreadDumpUrl,contentType:'text/plain')
                         healthcheck(href:metricsHealthcheckUrl,contentType:'application/json')
+                        ping(href:metricsPingUrl,contentType:'text/plain')
+
+                        if (extMeta) {
+                            extended {
+
+                                def dl = delegate
+                                extMeta.each { k, v ->
+                                    dl."$k"(v)
+                                }
+                            }
+
+                        }
                     }
                 }
 
@@ -450,6 +543,7 @@ class ApiController extends ControllerBase{
                         rundeck={
                             version=(appVersion)
                             build=(grailsApplication.metadata['build.ident'])
+                            buildGit=(grailsApplication.metadata['build.core.git.description'])
                             node=(nodeName)
                             base=(servletContext.getAttribute("RDECK_BASE"))
                             apiversion=(ApiVersions.API_CURRENT_VERSION)
@@ -501,6 +595,18 @@ class ApiController extends ControllerBase{
                         metrics=[href:metricsJsonUrl,contentType:'application/json']
                         threadDump=[href:metricsThreadDumpUrl,contentType:'text/plain']
                         healthcheck=[href:metricsHealthcheckUrl,contentType:'application/json']
+                        ping=[href:metricsPingUrl,contentType:'text/plain']
+
+                        if (extMeta) {
+                            extended = {
+
+                                def dl = delegate
+                                extMeta.each { k, v ->
+                                    dl."$k" = v
+                                }
+
+                            }
+                        }
                     }
                 }
             }

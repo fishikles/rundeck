@@ -20,6 +20,8 @@ import com.dtolabs.rundeck.app.support.ExecQuery
 import grails.gorm.transactions.Transactional
 import org.springframework.transaction.TransactionDefinition
 import rundeck.ExecReport
+import rundeck.ScheduledExecution
+
 @Transactional
 class ReportService  {
 
@@ -292,17 +294,6 @@ class ReportService  {
                                                 isNotNull(val)
                                                 ne(val, '')
                                             }
-                                        } else if (key == 'stat' && query["${key}Filter"] == 'succeed') {
-                                            or {
-                                                eq(val, 'succeed')
-                                                eq(val, 'succeeded')
-                                                eq(val, 'true')
-                                            }
-                                        } else if (key == 'stat' && query["${key}Filter"] == 'fail') {
-                                            or {
-                                                eq(val, 'fail')
-                                                eq(val, 'failed')
-                                            }
                                         } else if (query["${key}Filter"]) {
                                             eq(val, query["${key}Filter"])
                                         }
@@ -320,17 +311,6 @@ class ReportService  {
                             and {
                                 isNotNull(val)
                                 ne(val, '')
-                            }
-                        } else if (key == 'stat' && query["${key}Filter"] == 'succeed') {
-                            or {
-                                eq(val, 'succeed')
-                                eq(val, 'succeeded')
-                                eq(val, 'true')
-                            }
-                        } else if (key == 'stat' && query["${key}Filter"] == 'fail') {
-                            or {
-                                eq(val, 'fail')
-                                eq(val, 'failed')
                             }
                         } else if (query["${key}Filter"]) {
                             eq(val, query["${key}Filter"])
@@ -430,6 +410,13 @@ class ReportService  {
         def specialfilters = [
                 execnode: 'execnode'
         ]
+
+        if(query?.jobIdFilter && query.jobIdFilter.toString().length() == 36) {
+            def found = ScheduledExecution.findByUuid(query.jobIdFilter)
+            if(found) {
+                query.jobIdFilter = found.id.toString()
+            }
+        }
 
         def filters = [:]
         filters.putAll(txtfilters)

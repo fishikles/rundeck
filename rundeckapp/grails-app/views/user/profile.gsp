@@ -19,11 +19,6 @@
   - limitations under the License.
   --}%
 
-    <g:set var="tokenAdmin" value="${auth.resourceAllowedTest(
-            kind: 'user',
-            action: [AuthConstants.ACTION_ADMIN],
-            context: 'application'
-    )}"/>
     <g:set var="selfToken" value="${auth.resourceAllowedTest(
             kind: 'apitoken',
             action: [AuthConstants.GENERATE_USER_TOKEN],
@@ -43,16 +38,28 @@
         window.location.href = url + "?lang=" + jQuery("#language").val();
     }
     </script>
+
+    <g:jsMessages code="userController.page.profile.pager.summary"/>
+
+    <g:set var="currentLang" value="${response.locale?.toString() ?: request.locale?.toString()}"/>
     <g:embedJSON
-            data="${[user         : user.login,
-                     roles        : authRoles,
-                     adminAuth    : tokenAdmin,
-                     userTokenAuth: selfToken,
-                     svcTokenAuth : serviceToken,
-                     //grails stores current locale in http session under below key
-                     language     : session[org.springframework.web.servlet.i18n.SessionLocaleResolver.LOCALE_SESSION_ATTRIBUTE_NAME ]
+            data="${[user             : user.login,
+                     roles            : authRoles,
+                     adminAuth        : tokenAdmin,
+                     userTokenAuth    : selfToken,
+                     svcTokenAuth     : serviceToken,
+                     language         : currentLang,
+                     tokenPagingMax   : params.max,
+                     tokenPagingOffset: params.offset,
+                     tokenTotal       : tokenTotal,
+                     tokenTableSummaryText: message(code: "userController.page.profile.pager.summary",
+                             args: [
+                                     params.offset.toInteger() + 1,
+                                     Math.min((params.offset.toInteger() + params.max.toInteger()), tokenTotal),
+                                     tokenTotal
+                             ])
             ]}"
-            id="genPageData"></g:embedJSON>
+            id="genPageData"/>
 </head>
 <body>
 <div class="container-fluid">
@@ -66,7 +73,7 @@
           <div class="card">
               <div class="card-content">
                 <div class="row">
-                  <div class="col-xs-7">
+                    <div class="col-xs-6">
                     <div class="pull-left">
                       <g:link action="edit"
                               params="[login: user.login]"
@@ -77,17 +84,28 @@
                       </g:link>
                     </div>
                   </div>
-                  <div class="col-xs-5">
+
+                    <div class="col-xs-6 form-inline">
                     <div class="form-group pull-right">
-                        <label for="sort" class="col-sm-5 control-label" style="margin-top:.8em;"><g:message code="user.profile.language.label"/></label>
-                        <div class="col-sm-7">
-                          <select class="form-control" name="language" id="language" onchange="changeLanguage();">
-                              <option value="">English</option>
-                              <option value="es_419">Español</option>
-                              <option value="fr_FR">Français</option>
-                              <option value="zh_cn">简体中文</option>
-                          </select>
-                         </div>
+                        <label for="language" class=" control-label"><g:message
+                            code="user.profile.language.label"/></label>
+
+
+                        <g:set var="supportedLangs" value="${
+                            [
+                                en_US : 'English',
+                                es_419: 'Español',
+                                fr_FR : 'Français',
+                                zh_CN : '简体中文',
+                            ]
+                        }"/>
+                        <g:select class="form-control" name="language" id="language" onchange="changeLanguage();"
+                                  value="${currentLang}" from="${supportedLangs}" optionKey="key"
+                                  optionValue="value">
+
+                        </g:select>
+
+
                     </div>
                   </div>
                 </div>
@@ -97,7 +115,7 @@
                   </div>
                   <div class="pageBody" id="userProfilePage">
                       <g:jsonToken id='api_req_tokens' url="${request.forwardURI}"/>
-                      <tmpl:user user="${user}" edit="${true}"/>
+                      <tmpl:user user="${user}" edit="${true}" tokens="${tokenList}" tokenTotal="${tokenTotal}" />
                   </div>
               </div>
           </div>

@@ -18,30 +18,35 @@
 
 //Test the result of the build to verify expected artifacts are created
 
+cli = new CliBuilder(usage: 'slide')
+cli._(longOpt: 'buildType', args: 1, 'Build type [development | release]')
+def options = cli.parse(args)
+
 def target="build/libs"
 
 def props=new Properties()
-new File('gradle.properties').withReader{
+new File('version.properties').withReader{
     props.load(it)
 }
-args.each{
-    def m=it=~/^-[PD](.+?)(=(.+))?$/
-    if(m.matches()){
-        props[m[0][1]]=m[0][2]?m[0][3]:true
-    }
+
+def vNum = props.get('version.number')
+
+def version
+
+if(options.buildType == 'development'){
+    version = "${vNum}-SNAPSHOT".toString()
+} else if (options.buildType == 'release'){
+    version = props.get('version.version')
+} else {
+    throw new Exception("Unknown build type [${options.buildType}]".toString())
 }
 
-
-def tag="-SNAPSHOT"
-if(props.'release'){
-    tag= props.releaseTag && props.releaseTag!='GA' ? '-'+props.releaseTag : ''
-}
 def debug=Boolean.getBoolean('debug')?:("-debug" in args)
-def version=props.currentVersion+tag
+
 //versions of dependency we want to verify
 def versions=[
-        mysql:'5.1.42',
-        jetty:'9.4.9.v20180320',
+        mysql:'5.1.47',
+        jetty:'9.4.11.v20180605',
         servlet:'api-3.1.0'
 ]
 
@@ -50,8 +55,8 @@ def coreJarFile = "core/${target}/rundeck-core-${version}.jar"
 //def launcherJarFile = "rundeck-launcher/launcher/${target}/rundeck-launcher-${version}.jar"
 
 //the list of bundled plugins to verify in the war and jar
-def plugins=['script','stub','localexec','copyfile','job-state','flow-control','jasypt-encryption','git','orchestrator', 'source-refresh','upvar']
-def externalPlugins=['rundeck-ansible-plugin','aws-s3-model-source','py-winrm-plugin','openssh-node-execution']
+def plugins=['script','stub','localexec','copyfile','job-state','flow-control','jasypt-encryption','git','object-store','orchestrator', 'source-refresh','upvar']
+def externalPlugins=['rundeck-ansible-plugin','aws-s3-model-source','py-winrm-plugin','openssh-node-execution','multiline-regex-datacapture-filter', 'attribute-match-node-enhancer']
 
 //manifest describing expected build results
 def manifest=[
@@ -93,14 +98,14 @@ def manifest=[
         "templates/config/ssl.properties.template",
         "templates/sbin/rundeckd.template",
         "WEB-INF/lib/jetty-jaas-${versions.jetty}.jar",
-        "WEB-INF/lib-provided/jetty-server-${versions.jetty}.jar",
-        "WEB-INF/lib-provided/jetty-util-${versions.jetty}.jar",
+        "WEB-INF/lib/jetty-server-${versions.jetty}.jar",
+        "WEB-INF/lib/jetty-util-${versions.jetty}.jar",
         "WEB-INF/lib-provided/jetty-http-${versions.jetty}.jar",
         "WEB-INF/lib-provided/jetty-io-${versions.jetty}.jar",
-        "WEB-INF/lib-provided/jetty-security-${versions.jetty}.jar",
+        "WEB-INF/lib/jetty-security-${versions.jetty}.jar",
         "WEB-INF/lib/log4j-1.2.17.jar",
         "WEB-INF/lib-provided/javax.servlet-${versions.servlet}.jar",
-        "WEB-INF/lib/libpam4j-1.5.jar",
+        "WEB-INF/lib/libpam4j-1.10.jar",
         "WEB-INF/lib/not-yet-commons-ssl-0.3.17.jar",
     ],
     "plugins/script-plugin/${target}/rundeck-script-plugin-${version}.jar":[:],
@@ -111,6 +116,7 @@ def manifest=[
     "plugins/flow-control-plugin/${target}/rundeck-flow-control-plugin-${version}.jar":[:],
     "plugins/source-refresh-plugin/${target}/rundeck-source-refresh-plugin-${version}.jar":[:],
     "plugins/upvar-plugin/${target}/rundeck-upvar-plugin-${version}.jar":[:],
+    "plugins/object-store-plugin/${target}/rundeck-object-store-plugin-${version}.jar":[:],
 ]
 def pluginsum=1
 //generate list of plugin files in the jar to validate

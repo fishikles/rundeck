@@ -1871,6 +1871,52 @@ void testDecodeBasic__no_group(){
         assertEquals("*",jobs[0].year)
 
     }
+    /**
+     * Test  weekday
+     */
+    void testDecodeScheduledWeekday(){
+        def jobs = JobsXMLCodec.decode("""<joblist>
+  <job>
+    <id>5</id>
+    <name>wait1</name>
+    <description>a simple desc</description>
+    <loglevel>INFO</loglevel>
+    <group>some/group</group>
+    <context>
+      <project>test1</project>
+      <options>
+        <option name='delay' value='60' />
+      </options>
+    </context>
+    <sequence><command><exec>test</exec></command></sequence>
+    <dispatch>
+      <threadcount>1</threadcount>
+      <keepgoing>false</keepgoing>
+    </dispatch>
+    <schedule >
+      <time hour='*/4' minute='21' seconds='0' />
+      <day day='?' />
+      <weekday day='2-4' />
+      <month month='*/6' />
+      <year year=""/>
+    </schedule>
+  </job>
+</joblist>
+""")
+        assertNotNull jobs
+        assertEquals "incorrect size", 1, jobs.size()
+
+        assertEquals "incorrect scheduled", "true", jobs[0].scheduled.toString()
+        assertNull "incorrect scheduled", jobs[0].crontabString
+        assertEquals("*/4",jobs[0].hour)
+        assertEquals("21",jobs[0].minute)
+        assertEquals("0",jobs[0].seconds)
+        assertEquals("2-4",jobs[0].dayOfWeek)
+        assertEquals("?",jobs[0].dayOfMonth)
+        assertEquals("*/6",jobs[0].month)
+        assertEquals("*",jobs[0].year)
+
+    }
 
 
 
@@ -2482,10 +2528,10 @@ void testDecodeBasic__no_group(){
             assertFalse "incorrect enforced", opt0.required
             assertEquals "incorrect regex", "abc", opt0.regex
             assertNull "incorrect values size", opt0.realValuesUrl
-            assertNotNull "incorrect values size", opt0.values
-            assertEquals "incorrect values size", 3, opt0.values.size()
+            assertNotNull "incorrect values size", opt0.optionValues
+            assertEquals "incorrect values size", 3, opt0.optionValues.size()
             def values=[]
-            values.addAll(opt0.values as List)
+            values.addAll(opt0.optionValues as List)
             assertTrue "incorrect values content", values.contains("123")
             assertTrue "incorrect values content", values.contains("456")
             assertTrue "incorrect values content", values.contains("789")
@@ -2844,10 +2890,10 @@ void testDecodeBasic__no_group(){
             assertEquals "incorrect enforced", "false", opt0.enforced.toString()
             assertEquals "incorrect regex", "abc", opt0.regex
             assertNull "incorrect values size", opt0.realValuesUrl
-            assertNotNull "incorrect values size", opt0.values
-            assertEquals "incorrect values size", 3, opt0.values.size()
+            assertNotNull "incorrect values size", opt0.optionValues
+            assertEquals "incorrect values size", 3, opt0.optionValues.size()
             def values=[]
-            values.addAll(opt0.values as List)
+            values.addAll(opt0.optionValues as List)
             assertTrue "incorrect values content", values.contains("123")
             assertTrue "incorrect values content", values.contains("456")
             assertTrue "incorrect values content", values.contains("789")
@@ -3403,6 +3449,39 @@ void testDecodeBasic__no_group(){
             assertEquals "incorrect email content onstart", "h@example.com,j@example.com", onstart.mailConfiguration()
                     .recipients
             assertEquals "incorrect email content onstart", "start1", onstart.mailConfiguration().subject
+
+
+        //onsuccess notification wit attached inline
+        def xml4 = """<joblist>
+  <job>
+    <id>5</id>
+    <name>wait1</name>
+    <description></description>
+    <loglevel>INFO</loglevel>
+    <context>
+        <project>test1</project>
+    </context>
+    <sequence><command><exec>test</exec></command></sequence>
+    <dispatch>
+      <threadcount>1</threadcount>
+      <keepgoing>false</keepgoing>
+    </dispatch>
+    <notification>
+        <onsuccess>
+            <email recipients="a@example.com,b@example.com" attachLogInline="true"/>
+        </onsuccess>
+    </notification>
+  </job>
+</joblist>
+"""
+
+        jobs = JobsXMLCodec.decode(xml4)
+        assertNotNull jobs
+        onsuccess = jobs[0].notifications.find{'onsuccess'==it.eventTrigger}
+        assertNotNull "missing notifications onsuccess", onsuccess
+        assertNotNull "missing notifications onsuccess email", onsuccess.content
+        assertEquals "incorrect email content", "a@example.com,b@example.com", onsuccess.mailConfiguration().recipients
+        assertEquals "incorrect email attach settings", true, onsuccess.mailConfiguration().attachLogInline
     }
 
     void testDecodeNotificationPlugin() {

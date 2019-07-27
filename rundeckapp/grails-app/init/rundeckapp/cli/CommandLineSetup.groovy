@@ -24,6 +24,7 @@ import org.apache.commons.cli.Option
 import org.apache.commons.cli.OptionBuilder
 import org.apache.commons.cli.Options
 import org.apache.commons.cli.ParseException
+import com.dtolabs.rundeck.core.encrypter.PasswordUtilityEncrypter
 import rundeckapp.Application
 import rundeckapp.init.RundeckInitConfig
 
@@ -36,6 +37,10 @@ class CommandLineSetup {
 
     public static final String FLAG_INSTALLONLY = "installonly";
     public static final String FLAG_SKIPINSTALL = "skipinstall";
+    public static final String FLAG_ENCRYPT_PWD = "encryptpwd";
+    public static final String FLAG_TEST_AUTH   = "testauth";
+
+    private static final Map<String,PasswordUtilityEncrypter> encrypters = getEncrypters()
 
     private final Options options = new Options();
 
@@ -97,6 +102,16 @@ class CommandLineSetup {
                                           .withDescription("Perform installation only and do not start the server.")
                                           .create();
 
+        Option testauth = OptionBuilder.withLongOpt(FLAG_TEST_AUTH)
+                                          .withDescription("Test Jaas authentication configuration.")
+                                          .create();
+
+        Option encryptpwd = OptionBuilder.withLongOpt(FLAG_ENCRYPT_PWD)
+                                         .withArgName("ENCRYPTION-SERVICE")
+                                         .hasArg()
+                                         .withDescription("Encrypt a password for use in a property file using the specified service. Available services: " + encrypters.values().collect { it.name() }.join(", "))
+                                         .create();
+
         options.addOption(baseDir);
         options.addOption(dataDir);
         options.addOption(serverDir);
@@ -107,14 +122,15 @@ class CommandLineSetup {
         options.addOption(debugFlag);
         options.addOption(skipInstall);
         options.addOption(installonly);
+        options.addOption(testauth);
         options.addOption(projectDir);
+        options.addOption(encryptpwd);
     }
 
     RundeckCliOptions runSetup(String[] args) {
         RundeckCliOptions cliOptions = new RundeckCliOptions()
         cliOptions.debug = Boolean.getBoolean(SYS_PROP_RUNDECK_LAUNCHER_DEBUG);
         cliOptions.rewrite = Boolean.getBoolean(SYS_PROP_RUNDECK_LAUNCHER_REWRITE);
-
         final CommandLineParser parser = new GnuParser();
 
         final CommandLine cl;
@@ -130,13 +146,17 @@ class CommandLineSetup {
                 printUsage();
                 System.exit(1);
             }
+            if(cl.hasOption(FLAG_ENCRYPT_PWD)) {
+                encryptPassword(cl);
+                System.exit(0);
+            }
 
         } catch (ParseException e) {
             // oops, something went wrong
             System.err.println( "Parsing failed.  Reason: " + e.getMessage() );
             System.exit(1);
         }
-        cliOptions.debug = cl.hasOption('d');
+        if(!cliOptions.debug) cliOptions.debug = cl.hasOption('d');
 
         cliOptions.baseDir = cl.getOptionValue('b', System.getProperty(RundeckInitConfig.SYS_PROP_RUNDECK_BASE_DIR, getLaunchLocationParentDir()))
         cliOptions.serverBaseDir = cl.getOptionValue("serverdir", System.getProperty(RundeckInitConfig.SYS_PROP_RUNDECK_SERVER_SERVER_DIR, cliOptions.baseDir+ "/server"))
@@ -147,6 +167,7 @@ class CommandLineSetup {
         cliOptions.projectDir = cl.getOptionValue('p')
         cliOptions.skipInstall = cl.hasOption(FLAG_SKIPINSTALL)
         cliOptions.installOnly = cl.hasOption(FLAG_INSTALLONLY)
+        cliOptions.testAuth = cl.hasOption(FLAG_TEST_AUTH)
 
         if(!System.getProperty(RundeckInitConfig.SYS_PROP_RUNDECK_BASE_DIR) && cliOptions.baseDir) {
             System.setProperty(RundeckInitConfig.SYS_PROP_RUNDECK_BASE_DIR, cliOptions.baseDir)
@@ -156,7 +177,7 @@ class CommandLineSetup {
 
     }
 
-    //This happens when no RDECK_DIR was specified so we have to make a sane default
+//This happens when no RDECK_DIR was specified so we have to make a sane default
     String getLaunchLocationParentDir() {
         if(Environment.current == Environment.DEVELOPMENT) {
             File baseRundeckDir = new File(System.getProperty("user.dir"),"rundeck-runtime")
@@ -204,4 +225,37 @@ class CommandLineSetup {
         System.err.println("ERROR: " + s);
     }
 
+    static void encryptPassword(CommandLine cl) {
+        String service = cl.getOptionValue(FLAG_ENCRYPT_PWD)
+        PasswordUtilityEncrypter encrypter = encrypters[service.toUpperCase()]
+        if(!encrypter) {
+            System.err.println("No encryption service named: ${service}")
+            System.exit(1)
+        }
+        Map input = [:]
+        String rqMarker = "*"
+        System.out.println("Required values are marked with: ${rqMarker} ")
+        encrypter.formProperties().each { prop ->
+            System.out.println((prop.isRequired() ? rqMarker : "") + prop.title + " (${prop.description}):")
+            String val = System.console().readLine()
+            if(prop.isRequired() && val.isEmpty()) {
+                System.out.println("${prop.title} is required.")
+                System.exit(1)
+            }
+            input[prop.name] = val
+        }
+        System.out.println("\n==ENCRYPTED OUTPUT==")
+        encrypter.encrypt(input).each { k, v ->
+            System.out.println("${k}: ${v}")
+        }
+    }
+
+    static Map<String,PasswordUtilityEncrypter> getEncrypters() {
+        def encrypters= [:]
+        ServiceLoader<PasswordUtilityEncrypter> encrypterServices = ServiceLoader.load(
+                PasswordUtilityEncrypter
+        )
+        encrypterServices.each { encrypters[it.name().toUpperCase()] = it }
+        return encrypters
+    };
 }

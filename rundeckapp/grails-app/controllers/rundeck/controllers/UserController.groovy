@@ -23,6 +23,7 @@ import grails.converters.JSON
 import grails.core.GrailsApplication
 import org.rundeck.util.Sizes
 import rundeck.AuthToken
+import rundeck.Execution
 import rundeck.User
 import com.dtolabs.rundeck.app.api.ApiVersions
 import rundeck.services.FrameworkService
@@ -31,6 +32,8 @@ import rundeck.services.UserService
 import javax.servlet.http.HttpServletResponse
 
 class UserController extends ControllerBase{
+
+    private static final int DEFAULT_TOKEN_PAGE_SIZE = 50
 
     UserService userService
     FrameworkService frameworkService
@@ -55,7 +58,7 @@ class UserController extends ControllerBase{
     }
 
     def error = {
-        flash.loginerror=message(code:"invalid.username.and.password")
+        flash.loginerror = message(code: "invalid.username.and.password")
         return render(view:'login')
     }
 
@@ -97,28 +100,78 @@ class UserController extends ControllerBase{
     def profile() {
         //check auth to view profile
         //default to current user profile
-        if(!params.login){
-            params.login=session.user
+        if (!params.login) {
+            params.login = session.user
         }
         UserAndRolesAuthContext authContext = frameworkService.getAuthContextForSubject(session.subject)
-        if(unauthorizedResponse(params.login == session.user || frameworkService.authorizeApplicationResourceType
-                (authContext, AuthConstants.TYPE_USER, AuthConstants.ACTION_ADMIN), AuthConstants.ACTION_ADMIN,'Users',
-                params.login)){
+
+        def tokenAdmin = frameworkService.authorizeApplicationResourceType(
+                authContext,
+                AuthConstants.TYPE_USER,
+                AuthConstants.ACTION_ADMIN)
+
+        if (unauthorizedResponse(
+                params.login == session.user || tokenAdmin,
+                AuthConstants.ACTION_ADMIN, 'Users', params.login)) {
             return
         }
+
         def User u = User.findByLogin(params.login)
-        if(!u && params.login==session.user){
+        if (!u && params.login == session.user) {
             //redirect to profile edit page, so user can setup their profile
-            flash.message="Please fill out your profile"
-            return redirect(action:'register')
+            flash.message = "Please fill out your profile"
+            return redirect(action: 'register')
         }
-        if(notFoundResponse(u, 'User', params['login'])){
+        if (notFoundResponse(u, 'User', params['login'])) {
             return
         }
+
+        def tokenTotal = AuthToken.createCriteria().count {
+            if (!tokenAdmin) {
+                eq("creator", u.login)
+            }
+        }
+
+        int max = (params.max && params.max.isInteger()) ? params.max.toInteger() :
+                grailsApplication.config.getProperty(
+                        "rundeck.gui.user.profile.paginatetoken.max.per.page",
+                        Integer.class,
+                        DEFAULT_TOKEN_PAGE_SIZE)
+
+        int offset = (params.offset && params.offset.isInteger()) ? params.offset.toInteger() : 0
+
+        if(offset >= tokenTotal) {
+            def diff = (tokenTotal % max)
+            if( diff == 0 && tokenTotal > 0) {
+                diff = max
+            }
+            offset = tokenTotal - diff
+        }
+
+        def tokenList = AuthToken.createCriteria().list {
+            if (!tokenAdmin) {
+                eq("creator", u.login)
+            }
+            if (offset) {
+                firstResult(offset)
+            }
+            if (max) {
+                maxResults(max)
+            }
+            order("dateCreated", "desc")
+        }
+        params.max = max
+        params.offset = offset
+
         [
                 user              : u,
                 authRoles         : authContext.getRoles(),
-                tokenMaxExpiration: apiService.maxTokenDurationConfig()
+                tokenMaxExpiration: apiService.maxTokenDurationConfig(),
+                tokenAdmin        : tokenAdmin,
+                tokenList         : tokenList,
+                tokenTotal        : tokenTotal,
+                max               : max,
+                offset            : offset
         ]
     }
     def create={
@@ -280,6 +333,33 @@ class UserController extends ControllerBase{
         }
     }
 
+    def apiListRoles() {
+        if (!apiService.requireVersion(request, response, ApiVersions.V30)) {
+            return
+        }
+        UserAndRolesAuthContext authContext = frameworkService.getAuthContextForSubject(session.subject)
+        withFormat {
+            def xmlClosure = {
+                delegate.'roles' {
+                    authContext.getRoles().each { role ->
+                        delegate.'role'(role)
+                    }
+                }
+            }
+            xml {
+                return apiService.renderSuccessXml(request, response, xmlClosure)
+            }
+            json {
+                return apiService.renderSuccessJson(response) {
+                    delegate.roles=authContext.getRoles()
+                }
+            }
+            '*' {
+                return apiService.renderSuccessXml(request, response, xmlClosure)
+            }
+        }
+    }
+
     def apiUserList(){
         if (!apiService.requireVersion(request, response, ApiVersions.V21)) {
             return
@@ -307,8 +387,31 @@ class UserController extends ControllerBase{
             }
             return
         }
+        def users = []
+        if(request.api_version >= ApiVersions.V27){
+            def userList = [:]
+            User.listOrderByLogin().each {
+                def obj = [:]
+                obj.login = it.login
+                obj.firstName = it.firstName
+                obj.lastName = it.lastName
+                obj.email = it.email
+                obj.created = it.dateCreated
+                obj.updated = it.lastUpdated
+                def lastExec = Execution.lastExecutionByUser(it.login).list()
+                if(lastExec?.size()>0){
+                    obj.lastJob = lastExec.get(0).dateStarted
+                }
+                def tokenList = AuthToken.findAllByUser(it)
+                obj.tokens = tokenList?.size()
+                userList.put(it.login,obj)
+            }
+            userList.each{k,v -> users<<v}
+        }else{
+            users = User.findAll()
+        }
 
-        def users = User.findAll()
+
         withFormat {
             def xmlClosure = {
                     users.each { u ->
@@ -317,6 +420,12 @@ class UserController extends ControllerBase{
                             firstName(u.firstName)
                             lastName(u.lastName)
                             email(u.email)
+                            if(request.api_version >= ApiVersions.V27){
+                                created(u.created)
+                                updated(u.updated)
+                                lastJob(u.lastJob)
+                                tokens(u.tokens)
+                            }
                         }
                     }
             }
@@ -326,7 +435,12 @@ class UserController extends ControllerBase{
             json {
                 return apiService.renderSuccessJson(response) {
                     users.each {
-                        def u = [login: it.login, firstName: it.firstName, lastName: it.lastName, email: it.email]
+                        def u
+                        if(request.api_version >= ApiVersions.V27){
+                            u = it
+                        }else{
+                            u = [login: it.login, firstName: it.firstName, lastName: it.lastName, email: it.email]
+                        }
                         element(u)
                     }
                 }
@@ -585,7 +699,15 @@ class UserController extends ControllerBase{
             return
         }
 
-        return redirect(controller: 'user', action: 'profile', params: [login: login])
+        def redirParams = [login: login]
+        if (params.tokenPagingMax) {
+            redirParams.max = params.tokenPagingMax
+        }
+        if (params.tokenPagingOffset) {
+            redirParams.offset = params.tokenPagingOffset
+        }
+
+        return redirect(controller: 'user', action: 'profile', params: redirParams)
     }
     def clearApiToken(User user) {
         boolean valid = false
@@ -682,7 +804,11 @@ class UserController extends ControllerBase{
         if (result.error) {
             flash.error = result.error
         }
-        return redirect(controller: 'user', action: 'profile', params: [login: login])
+        return redirect(controller: 'user', action: 'profile', params: [
+                login: login,
+                max: params.tokenPagingMax,
+                offset: params.tokenPagingOffset
+        ])
 
     }
     def setDashboardPref={
@@ -708,6 +834,7 @@ class UserController extends ControllerBase{
             if(result.error){
                 return renderErrorFragment(result.error)
             }
+            session.filterPref=userService.parseKeyValuePref(result.user?.filterPref)
             def storedpref=result.storedpref
 
             //include new request tokens as headers in response

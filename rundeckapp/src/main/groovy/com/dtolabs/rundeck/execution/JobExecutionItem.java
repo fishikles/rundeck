@@ -50,4 +50,6 @@ public interface JobExecutionItem extends HandlerExecutionItem, NodeStepExecutio
     public Boolean getNodeIntersect();
     public Boolean isFailOnDisable();
     public Boolean isImportOptions();
+    public Boolean isUseName();
+    public Boolean isIgnoreNotifications();
 }

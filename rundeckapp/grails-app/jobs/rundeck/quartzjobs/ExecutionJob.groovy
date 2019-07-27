@@ -21,19 +21,18 @@ import com.codahale.metrics.Timer
 import com.dtolabs.rundeck.core.authorization.AuthContext
 import com.dtolabs.rundeck.core.dispatcher.DataContextUtils
 import com.dtolabs.rundeck.core.dispatcher.ExecutionState
-import com.dtolabs.rundeck.core.execution.ServiceThreadBase
 import com.dtolabs.rundeck.core.execution.WorkflowExecutionServiceThread
 import grails.core.GrailsApplication
 import grails.gorm.transactions.Transactional
 import org.quartz.JobExecutionContext
 import com.dtolabs.rundeck.core.common.Framework
 import org.quartz.InterruptableJob
-
 import com.dtolabs.rundeck.core.execution.workflow.NodeRecorder
 import org.rundeck.util.Sizes
 import rundeck.Execution
 import rundeck.ScheduledExecution
 import rundeck.services.ExecutionService
+import rundeck.services.ExecutionServiceException
 import rundeck.services.ExecutionUtilService
 import rundeck.services.FrameworkService
 import rundeck.services.execution.ThresholdValue
@@ -117,6 +116,14 @@ class ExecutionJob implements InterruptableJob {
         def Map initMap
         try{
             initMap= initialize(context,context.jobDetail.jobDataMap)
+        } catch (ExecutionServiceException es) {
+            if (es.code == 'conflict') {
+                log.error("Unable to start Job execution: ${es.message ?: 'no message'}")
+                return
+            } else {
+                log.error("Unable to start Job execution: ${es.message ?: 'no message'}", es)
+                throw es
+            }
         }catch(Throwable t){
             log.error("Unable to start Job execution: ${t.message?t.message:'no message'}",t)
             throw t
@@ -234,7 +241,7 @@ class ExecutionJob implements InterruptableJob {
 
         if(initMap.isTemp){
             //an adhoc execution without associated job
-            initMap.execution = Execution.get(initMap.executionId)
+            initMap.execution = fetchExecution(initMap.executionId)
             if (!initMap.execution) {
                 throw new RuntimeException("failed to lookup Exception object from job data map: id: ${initMap.executionId}")
             }
@@ -250,7 +257,7 @@ class ExecutionJob implements InterruptableJob {
             initMap.executionId=jobDataMap.get("executionId")
             initMap.secureOpts=jobDataMap.get("secureOpts")
             initMap.secureOptsExposed=jobDataMap.get("secureOptsExposed")
-            initMap.execution = Execution.get(initMap.executionId)
+            initMap.execution = fetchExecution(initMap.executionId)
             //NOTE: Oracle/hibernate bug workaround: if session has not flushed we may have to wait until Execution.get
             //can return the right entity
             int retry=30
@@ -259,7 +266,7 @@ class ExecutionJob implements InterruptableJob {
             }
             while(!initMap.execution && retry>0){
                 Thread.sleep(2000)
-                initMap.execution = Execution.get(initMap.executionId)
+                initMap.execution = fetchExecution(initMap.executionId)
                 retry--;
             }
             if (!initMap.execution) {
@@ -271,7 +278,6 @@ class ExecutionJob implements InterruptableJob {
             if (! initMap.execution instanceof Execution) {
                 throw new RuntimeException("JobDataMap contained invalid Execution type: " + initMap.execution.getClass().getName())
             }
-            initMap.execution.refresh()
             def jobArguments=initMap.frameworkService.parseOptsFromString(initMap.execution?.argString)
             if (initMap.scheduledExecution?.timeout && initMap.scheduledExecution?.timeout.contains('${')) {
                 def timeout = DataContextUtils.replaceDataReferencesInString(initMap.scheduledExecution?.timeout,
@@ -379,7 +385,11 @@ class ExecutionJob implements InterruptableJob {
         def WorkflowExecutionServiceThread thread = execmap.thread
         def Consumer<Long> periodicCheck = execmap.periodicCheck
         def ThresholdValue threshold = execmap.threshold
-        def jobAverageDuration = execmap.scheduledExecution?execmap.scheduledExecution.averageDuration:0
+        def jobAverageDuration
+        ScheduledExecution.withTransaction {
+            jobAverageDuration = execmap.scheduledExecution?execmap.scheduledExecution.averageDuration:0
+        }
+
         def boolean avgNotificationSent = false
         def boolean stop=false
 
@@ -389,6 +399,7 @@ class ExecutionJob implements InterruptableJob {
                                                                     thread?.context?.dataContext
                                     )
 
+        def context = execmap?.thread?.context
         boolean never=true
         while (thread.isAlive() || never) {
             never=false
@@ -404,7 +415,7 @@ class ExecutionJob implements InterruptableJob {
                             execmap.scheduledExecution.id,
                             [
                                     execution: execmap.execution,
-                                    context:execmap
+                                    context:context
                             ]
                     )
                     avgNotificationSent=true
@@ -610,6 +621,16 @@ class ExecutionJob implements InterruptableJob {
 
         }
         return saveStateComplete
+    }
+
+    @Transactional
+    Execution fetchExecution(def id) {
+        def execution = Execution.get(id)
+        if (execution != null) {
+            execution.refresh()
+        }
+
+        return execution
     }
 
     def ScheduledExecution fetchScheduledExecution(def jobDataMap) {

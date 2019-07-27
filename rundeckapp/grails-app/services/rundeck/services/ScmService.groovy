@@ -50,8 +50,8 @@ import com.dtolabs.rundeck.plugins.scm.ScmPluginException
 import com.dtolabs.rundeck.plugins.scm.ScmPluginInvalidInput
 import com.dtolabs.rundeck.plugins.scm.ScmUserInfo
 import com.dtolabs.rundeck.plugins.scm.ScmUserInfoMissing
-import com.dtolabs.rundeck.server.plugins.DescribedPlugin
-import com.dtolabs.rundeck.server.plugins.ValidatedPlugin
+import com.dtolabs.rundeck.core.plugins.DescribedPlugin
+import com.dtolabs.rundeck.core.plugins.ValidatedPlugin
 import com.dtolabs.rundeck.server.plugins.services.ScmExportPluginProviderService
 import com.dtolabs.rundeck.server.plugins.services.ScmImportPluginProviderService
 import rundeck.ScheduledExecution
@@ -685,7 +685,22 @@ class ScmService {
      * @return
      */
     def removePluginConfiguration(String integration, String project, String type) {
-        disablePlugin(integration, project, type)
+        def loaded
+        if (integration == EXPORT) {
+            loaded = loadedExportPlugins.remove(project)
+            loaded?.close()
+            def changeListener = loadedExportListeners.remove(project)
+            jobEventsService.removeListener(changeListener)
+            //clear cached rename/delete info
+            renamedJobsCache.remove(project)
+            deletedJobsCache.remove(project)
+        } else {
+            loaded = loadedImportPlugins.remove(project)
+            loaded?.close()
+            def changeListener = loadedImportListeners.remove(project)
+            jobEventsService.removeListener(changeListener)
+        }
+        loaded?.provider?.cleanup()
         pluginConfigService.removePluginConfiguration(project, pathForConfigFile(integration))
     }
     /**
@@ -1060,12 +1075,14 @@ class ScmService {
      * @param jobs
      * @return
      */
-    Map<String, JobState> exportStatusForJobs(List<ScheduledExecution> jobs) {
+    Map<String, JobState> exportStatusForJobs(UserAndRolesAuthContext auth, List<ScheduledExecution> jobs) {
         def status = [:]
         def clusterMode = frameworkService.isClusterModeEnabled()
         if(jobs && jobs.size()>0 && clusterMode){
             def project = jobs.get(0).project
-            fixExportStatus(project, jobs)
+            if(auth){
+                fixExportStatus(auth, project, jobs)
+            }
         }
 
         exportjobRefsForJobs(jobs).each { jobReference ->
@@ -1100,12 +1117,12 @@ class ScmService {
      * @param jobs
      * @return
      */
-    Map<String, JobImportState> importStatusForJobs(List<ScheduledExecution> jobs) {
+    Map<String, JobImportState> importStatusForJobs(UserAndRolesAuthContext auth, List<ScheduledExecution> jobs) {
         def status = [:]
         def clusterMode = frameworkService.isClusterModeEnabled()
         if(jobs && jobs.size()>0 && clusterMode){
             def project = jobs.get(0).project
-            fixImportStatus(project,jobs)
+            fixImportStatus(auth,project,jobs)
         }
         scmJobRefsForJobs(jobs).each { JobScmReference jobReference ->
             def plugin = getLoadedImportPluginFor jobReference.project
@@ -1322,19 +1339,21 @@ class ScmService {
         return pluginConfig.getSettingList('trackedItems')
     }
 
-    public fixExportStatus(String project, List<ScheduledExecution> jobs){
+    public fixExportStatus(UserAndRolesAuthContext auth, String project, List<ScheduledExecution> jobs){
+        def context = scmOperationContext(auth, project)
         if(jobs && jobs.size()>0){
             def joblist = exportjobRefsForJobs(jobs)
             def plugin = getLoadedExportPluginFor project
-            plugin?.clusterFixJobs(joblist)
+            plugin?.clusterFixJobs(context, joblist)
         }
     }
 
-    public fixImportStatus(String project, List<ScheduledExecution> jobs){
+    public fixImportStatus(UserAndRolesAuthContext auth, String project, List<ScheduledExecution> jobs){
+        def context = scmOperationContext(auth, project)
         if(jobs && jobs.size()>0){
             def joblist = scmJobRefsForJobs(jobs)
             def plugin = getLoadedImportPluginFor project
-            plugin?.clusterFixJobs(joblist)
+            plugin?.clusterFixJobs(context, joblist)
         }
 
     }

@@ -1,6 +1,9 @@
 package rundeckapp
 
 import com.codahale.metrics.MetricRegistry
+import com.codahale.metrics.health.HealthCheck
+import com.codahale.metrics.health.HealthCheckRegistry
+import com.dtolabs.launcher.Setup
 
 /*
  * Copyright 2016 SimplifyOps, Inc. (http://simplifyops.com)
@@ -17,14 +20,12 @@ import com.codahale.metrics.MetricRegistry
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import com.codahale.metrics.health.HealthCheck
-import com.codahale.metrics.health.HealthCheckRegistry
-import com.dtolabs.launcher.Setup
 import com.dtolabs.rundeck.app.api.ApiMarshallerRegistrar
 import com.dtolabs.rundeck.core.Constants
 import com.dtolabs.rundeck.core.VersionConstants
 import com.dtolabs.rundeck.core.utils.ThreadBoundOutputStream
 import com.dtolabs.rundeck.util.quartz.MetricsSchedulerListener
+import grails.events.bus.EventBus
 import grails.plugin.springsecurity.SecurityFilterPosition
 import grails.plugin.springsecurity.SpringSecurityUtils
 import grails.util.Environment
@@ -58,6 +59,7 @@ class BootStrap {
     def dataSource
     ApiMarshallerRegistrar apiMarshallerRegistrar
     def authenticationManager
+    def EventBus grailsEventBus
 
     def timer(String name,Closure clos){
         long bstart=System.currentTimeMillis()
@@ -87,6 +89,10 @@ class BootStrap {
 
          servletContext.setAttribute("app.ident",grailsApplication.metadata['build.ident'])
          log.info("Starting ${appname} ${servletContext.getAttribute('app.ident')} ($shortBuildDate) ...")
+         if(Boolean.getBoolean('rundeck.bootstrap.build.info')){
+             def buildInfo=grailsApplication.metadata.findAll{it.key.startsWith('build.core.git.')}
+             log.info("${appname} Build: ${buildInfo}")
+         }
          /*filterInterceptor.handlers.sort { FilterToHandlerAdapter handler1,
                                            FilterToHandlerAdapter handler2 ->
              FilterConfig filter1 = handler1.filterConfig
@@ -222,7 +228,7 @@ class BootStrap {
                  servletContext.setAttribute("TOKENS_FILE_PATH", new File(tokensfile).absolutePath)
                  servletContext.setAttribute("TOKENS_FILE_PROPS", tokens)
                  if (tokens) {
-                     log.debug("Loaded ${tokens.size} tokens from tokens file: ${tokensfile}...")
+                     log.debug("Loaded ${tokens.size()} tokens from tokens file: ${tokensfile}...")
                  }
              }
 
@@ -235,6 +241,7 @@ class BootStrap {
             }
          }
          frameworkService.initialize()
+         executionService.initialize()
 
          //initialize manually to avoid circular reference problem with spring
          timer("Initialized WorkflowService"){
@@ -267,12 +274,26 @@ class BootStrap {
              authenticationManager.providers.add(grailsApplication.mainContext.getBean("realmAuthProvider"))
          }
 
+         if('true' == grailsApplication.config.rundeck.security.authorization.preauthenticated.enabled
+            || grailsApplication.config.grails.plugin.springsecurity.useX509 in [true,'true']){
+             authenticationManager.providers.add(grailsApplication.mainContext.getBean("preAuthenticatedAuthProvider"))
+         }
+
          if('true' == grailsApplication.config.rundeck.security.authorization.preauthenticated.enabled){
              SpringSecurityUtils.clientRegisterFilter("rundeckPreauthFilter", SecurityFilterPosition.PRE_AUTH_FILTER.order - 10)
-             authenticationManager.providers.add(grailsApplication.mainContext.getBean("preAuthenticatedAuthProvider"))
              log.info("Preauthentication is enabled")
          } else {
              log.info("Preauthentication is disabled")
+         }
+
+         if(grailsApplication.config.rundeck.security.enforceMaxSessions in [true,'true']) {
+             SpringSecurityUtils.clientRegisterFilter("concurrentSessionFilter", SecurityFilterPosition.CONCURRENT_SESSION_FILTER.order)
+         }
+
+         if(!grailsApplication.config.rundeck.logout.redirect.url.isEmpty()) {
+             log.debug("Setting logout url to: ${grailsApplication.config.rundeck.logout.redirect.url}")
+             def logoutSuccessHandler = grailsApplication.mainContext.getBean("logoutSuccessHandler")
+             logoutSuccessHandler.defaultTargetUrl = grailsApplication.config.rundeck.logout.redirect.url
          }
 
          if(grailsApplication.config.execution.follow.buffersize){
@@ -313,6 +334,12 @@ class BootStrap {
          if(!maxLastLines || !(maxLastLines instanceof Integer) || maxLastLines < 1){
              grailsApplication.config.rundeck.gui.execution.tail.lines.max = 500
          }
+         if(grailsApplication.config.rundeck.feature.cleanExecutionsHistoryJob.enabled){
+             log.warn("Feature 'cleanExecutionHistoryJob' is enabled")
+            frameworkService.rescheduleAllCleanerExecutionsJob()
+         } else {
+             log.info("Feature 'cleanExecutionHistoryJob' is disabled")
+         }
          healthCheckRegistry?.register("quartz.scheduler.threadPool",new HealthCheck() {
              @Override
              protected com.codahale.metrics.health.HealthCheck.Result check() throws Exception {
@@ -331,8 +358,10 @@ class BootStrap {
              @Override
              protected com.codahale.metrics.health.HealthCheck.Result check() throws Exception {
                  long start=System.currentTimeMillis()
-                 def valid = dataSource.connection.isValid(60)
+                 def metricDataSource=dataSource.connection
+                 def valid = metricDataSource.isValid(60)
                  long dur=System.currentTimeMillis()-start
+                 metricDataSource.close()
                  if(dur<(dbHealthTimeout*1000L)){
                      com.codahale.metrics.health.HealthCheck.Result.healthy("Datasource connection healthy with timeout ${dbHealthTimeout} seconds")
                  }  else{
@@ -344,8 +373,10 @@ class BootStrap {
          int dbPingTimeout = configurationService.getInteger("metrics.datasource.ping.timeout", 60)
          metricRegistry.register(MetricRegistry.name("dataSource.connection","pingTime"),new CallableGauge<Long>({
              long start=System.currentTimeMillis()
-             def valid = dataSource.connection.isValid(dbPingTimeout)
+             def metricDataSource=dataSource.connection
+             def valid = metricDataSource.isValid(dbPingTimeout)
              System.currentTimeMillis()-start
+             metricDataSource.close()
          }))
          //set up some metrics collection for the Quartz scheduler
          metricRegistry.register(MetricRegistry.name("rundeck.scheduler.quartz","runningExecutions"),new CallableGauge<Integer>({
@@ -444,7 +475,12 @@ class BootStrap {
                  log.debug("logFileStorageService.resumeIncompleteLogStorage: skipping per configuration")
              }
              fileUploadService.onBootstrap()
+
+             if(grailsApplication.config.dataSource.driverClassName=='org.h2.Driver'){
+                 log.warn("[Development Mode] Usage of H2 database is recommended only for development and testing")
+             }
          }
+         grailsEventBus.notify('rundeck.bootstrap')
          log.info("Rundeck startup finished in ${System.currentTimeMillis()-bstart}ms")
      }
 

@@ -27,12 +27,14 @@ class FormTokenInterceptor {
     public static final String TOKEN_KEY_HEADER = 'X-RUNDECK-TOKEN-KEY'
     public static final String TOKEN_URI_HEADER = 'X-RUNDECK-TOKEN-URI'
 
+    int order = HIGHEST_PRECEDENCE + 1
+
     FormTokenInterceptor() {
         matchAll().excludes(controller: 'static')
     }
 
     boolean before() {
-        if(InterceptorHelper.matchesStaticAssets(controllerName)) return true
+        if(InterceptorHelper.matchesStaticAssets(controllerName, request)) return true
         //transfer request token from header to params, for the form verification used in controllers
         if(request.getHeader(TOKEN_KEY_HEADER) && request.getHeader(TOKEN_URI_HEADER)){
             params[SynchronizerTokensHolder.TOKEN_KEY]=request.getHeader(TOKEN_KEY_HEADER)

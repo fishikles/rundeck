@@ -19,7 +19,10 @@
 //= require knockout-onenter
 //= require ko/binding-url-path-param
 //= require ko/binding-message-template
+//= require ko/handler-bootstrapPopover
+//= require ko/handler-bootstrapTooltip
 //= require menu/project-model
+//= require koBind
 
 function ProjectHome(name, data) {
     "use strict";
@@ -35,7 +38,7 @@ function ProjectHome(name, data) {
             headers: {'x-rundeck-ajax': 'true'},
             url: _genUrl(self.baseUrl, params),
             success: function (data, status, jqxhr) {
-                if (data.projects && data.projects.length == 1) {
+                if (data.projects && data.projects.length === 1) {
                     ko.mapping.fromJS(jQuery.extend(data.projects[0], {loaded: true}), null, self.project);
                 }
             }
@@ -47,14 +50,12 @@ function ProjectHome(name, data) {
  * START page init
  */
 function init() {
-    // ko.options.deferUpdates = true;
     var data = loadJsonData('projectData');
-    var projectHome = new ProjectHome(data.project, {baseUrl: appLinks.menuHomeAjax});
+    window.projectHome  = new ProjectHome(data.project, {baseUrl: appLinks.menuHomeAjax});
     projectHome.project(
         new Project({name: data.project, page: 'projectHome'})
     );
     projectHome.load();
-    ko.applyBindings(projectHome);
-    window.projectHome = projectHome;
+    initKoBind(null,{projectHome:projectHome})
 }
 jQuery(init);

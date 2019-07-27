@@ -17,6 +17,7 @@
 package com.dtolabs.rundeck.core.schedule;
 
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -67,4 +68,23 @@ public interface JobScheduleManager {
      * @return true if the scheduleOWner should change to current node.
      */
     boolean updateScheduleOwner(String name, String group, Map data);
+
+    /**
+     * Return the uuid of the node that will execute the scheduled execution.
+     *
+     * @param name job name
+     * @param group job group
+     * @param data map with job informations.
+     * @param project projectName
+     * @return uuid of node for the scheduled execution
+     */
+    String determineExecNode(String name, String group, Map data, String project);
+
+
+    /**
+     * Return list dead cluster members.
+     *
+     * @return list dead cluster members
+     */
+    List<String> getDeadMembers(String uuid);
 }

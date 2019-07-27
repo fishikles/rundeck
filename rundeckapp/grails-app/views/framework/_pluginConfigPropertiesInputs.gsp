@@ -94,40 +94,59 @@
         <hr/>
     </g:if>
 
-    <div class="form-group">
-        <span class="col-sm-12 ">
-            <g:if test="${isSecondary}">
+    <div class="" style="margin-top:10px;">
+      <g:if test="${isSecondary}">
+          <details ${hasValue ? 'open' : ''} class="details-reset more-info">
+              <summary class="${groupTitleCss?:''}">
+                  ${group != '-' ? group : defaultGroupName}
+                  <span class="more-indicator-verbiage more-info-icon"><g:icon name="chevron-right"/></span>
+                  <span class="less-indicator-verbiage more-info-icon"><g:icon name="chevron-down"/></span>
+              </summary>
 
-                <g:collapser text="${group!='-'?group:defaultGroupName}"
-                             key="propgroup_${gkey}"
-                             open="${hasValue?'true':'false'}"
-                             classnames=""
-                />
+              <div>
+                  <g:each in="${groupProps}" var="prop">
+                      <g:render
+                              template="/framework/pluginConfigPropertyFormField"
+                              model="${[prop             : prop,
+                                        dynamicProperties: dynamicProperties ? dynamicProperties[prop.name] : null,
+                                        prefix           : prefix,
+                                        error            : report?.errors ? report.errors[prop.name] : null,
+                                        values           : values,
+                                        fieldname        : (fieldnamePrefix ?: '') + prop.name,
+                                        origfieldname    : (origfieldnamePrefix ?: '') + prop.name,
+                                        service          : service,
+                                        provider         : provider,
+                                        messagePrefix    : messagePrefix,
+                                        messagesType     : messagesType,
+                                        extraInputCss    : extraInputCss
+                              ]}"/>
+                  </g:each>
+              </div>
+          </details>
 
-            </g:if>
-            <g:else>
-                <span class="control-label input-lg">${group!='-'?group:defaultGroupName}</span>
-            </g:else>
-        </span>
-    </div>
+      </g:if>
+      <g:else>
+          <div class="${groupTitleCss?:''}">${group!='-'?group:defaultGroupName}</div>
 
-    <div id="propgroup_${gkey}" class="${wdgt.css(if:isSecondary,then:'collapse collapse-expandable')} ${wdgt.css(if:hasValue,then:'in')}">
-        <g:each in="${groupProps}" var="prop">
-            <g:render
-                    template="/framework/pluginConfigPropertyFormField"
-                    model="${[prop         : prop,
-                              dynamicProperties : dynamicProperties ? dynamicProperties[prop.name] : null,
-                              prefix       : prefix,
-                              error        : report?.errors ? report.errors[prop.name] : null,
-                              values       : values,
-                              fieldname    : (fieldnamePrefix ?: '') + prop.name,
-                              origfieldname: (origfieldnamePrefix ?: '') + prop.name,
-                              service      : service,
-                              provider     : provider,
-                              messagePrefix:messagePrefix,
-                              messagesType : messagesType,
-                              extraInputCss:extraInputCss
-                    ]}"/>
-        </g:each>
+          <div>
+              <g:each in="${groupProps}" var="prop">
+                  <g:render
+                          template="/framework/pluginConfigPropertyFormField"
+                          model="${[prop             : prop,
+                                    dynamicProperties: dynamicProperties ? dynamicProperties[prop.name] : null,
+                                    prefix           : prefix,
+                                    error            : report?.errors ? report.errors[prop.name] : null,
+                                    values           : values,
+                                    fieldname        : (fieldnamePrefix ?: '') + prop.name,
+                                    origfieldname    : (origfieldnamePrefix ?: '') + prop.name,
+                                    service          : service,
+                                    provider         : provider,
+                                    messagePrefix    : messagePrefix,
+                                    messagesType     : messagesType,
+                                    extraInputCss    : extraInputCss
+                          ]}"/>
+              </g:each>
+          </div>
+      </g:else>
     </div>
 </g:each>

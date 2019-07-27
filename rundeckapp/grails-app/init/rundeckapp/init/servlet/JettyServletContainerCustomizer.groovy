@@ -15,19 +15,63 @@
  */
 package rundeckapp.init.servlet
 
+import com.dtolabs.rundeck.core.init.CustomWebAppInitializer
+import org.eclipse.jetty.webapp.AbstractConfiguration
+import org.eclipse.jetty.webapp.WebAppContext
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import org.springframework.boot.context.embedded.ConfigurableEmbeddedServletContainer
 import org.springframework.boot.context.embedded.EmbeddedServletContainerCustomizer
 import org.springframework.boot.context.embedded.jetty.JettyEmbeddedServletContainerFactory
 
-
+/**
+ * Customize embedded jetty
+ */
 class JettyServletContainerCustomizer implements EmbeddedServletContainerCustomizer {
-
-    //This class must be registered in resources.groovy in order for it to be picked up
+    /**
+     * Set of init parameters to set in the web app context
+     */
+    Map<String, String> initParams = [:]
 
     @Override
     void customize(final ConfigurableEmbeddedServletContainer container) {
         if(container instanceof JettyEmbeddedServletContainerFactory) {
-            //customize jetty here if we need to
+            container.addConfigurations(new JettyConfigPropsInitParameterConfiguration(initParams))
         }
+    }
+}
+
+/**
+ * Set init params for the WebAppContext
+ */
+class JettyConfigPropsInitParameterConfiguration extends AbstractConfiguration {
+    private static final Logger LOG = LoggerFactory.getLogger(this)
+    Map<String, String> initParams
+
+    JettyConfigPropsInitParameterConfiguration(final Map<String, String> initParams) {
+        this.initParams = initParams
+    }
+
+    @Override
+    void preConfigure(final WebAppContext context) throws Exception {
+        super.preConfigure(context)
+        for (String key : initParams.keySet()) {
+            context.setInitParameter(key, initParams[key])
+        }
+        //Call custom initialization code
+        try {
+            def jettyCustomizers = getJettyCustomizers()
+            jettyCustomizers.each { customizer ->
+               LOG.debug("Customizing jetty with: ${customizer.class.canonicalName}")
+               customizer.customizeWebAppContext(context)
+            }
+        } catch(Exception ex) {
+            LOG.error("Unable to configure embedded container with custom client authenticator or login service code",ex)
+            throw ex
+        }
+    }
+
+    def getJettyCustomizers() {
+        return ServiceLoader.load(CustomWebAppInitializer)
     }
 }

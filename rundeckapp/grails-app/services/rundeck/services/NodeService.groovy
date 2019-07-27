@@ -17,15 +17,20 @@
 package rundeck.services
 
 import com.codahale.metrics.MetricRegistry
+import com.dtolabs.rundeck.core.common.FrameworkProject
 import com.dtolabs.rundeck.core.common.INodeSet
 import com.dtolabs.rundeck.core.common.IProjectNodes
 import com.dtolabs.rundeck.core.common.IProjectNodesFactory
 import com.dtolabs.rundeck.core.common.IRundeckProjectConfig
 import com.dtolabs.rundeck.core.common.ProjectNodeSupport
 import com.dtolabs.rundeck.core.nodes.ProjectNodeService
+import com.dtolabs.rundeck.core.plugins.CloseableProvider
 import com.dtolabs.rundeck.core.plugins.Closeables
 import com.dtolabs.rundeck.core.plugins.configuration.Property
+import com.dtolabs.rundeck.core.resources.ResourceModelSourceFactory
+import com.dtolabs.rundeck.core.resources.ResourceModelSourceService
 import com.dtolabs.rundeck.core.resources.SourceFactory
+import com.dtolabs.rundeck.plugins.ServiceNameConstants
 import com.dtolabs.rundeck.plugins.util.PropertyBuilder
 import com.google.common.cache.CacheBuilder
 import com.google.common.cache.CacheLoader
@@ -35,10 +40,10 @@ import com.google.common.cache.RemovalNotification
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.ListenableFutureTask
+import org.rundeck.core.projects.ProjectConfigurable
+import org.rundeck.core.projects.ProjectPluginListConfigurable
 import org.springframework.beans.factory.InitializingBean
 import org.springframework.core.task.AsyncListenableTaskExecutor
-import rundeck.Project
-import rundeck.services.framework.RundeckProjectConfigurable
 import rundeck.services.nodes.CachedProjectNodes
 
 import java.util.concurrent.TimeUnit
@@ -46,21 +51,23 @@ import java.util.concurrent.TimeUnit
 /**
  * Provides asynchronous loading and caching of nodesets for projects
  */
-class NodeService implements InitializingBean, RundeckProjectConfigurable,IProjectNodesFactory, ProjectNodeService {
+class NodeService implements InitializingBean, ProjectConfigurable, IProjectNodesFactory, ProjectNodeService, ProjectPluginListConfigurable {
     public static final String PROJECT_NODECACHE_DELAY = 'project.nodeCache.delay'
     public static final String PROJECT_NODECACHE_ENABLED = 'project.nodeCache.enabled'
+    public static final String PROJECT_NODECACHE_FIRSTLOAD_SYNCH = 'project.nodeCache.firstLoadSynch'
     static transactional = false
     public static final String DEFAULT_CACHE_SPEC = "refreshInterval=30s"
     def metricService
     def frameworkService
     def configurationService
+    def pluginService
     def AsyncListenableTaskExecutor nodeTaskExecutor
 
     String category='resourceModelSource'
 
     @Override
     Map<String, String> getCategories() {
-        [enabled: 'resourceModelSource', delay: 'resourceModelSource']
+        [enabled: 'resourceModelSource', delay: 'resourceModelSource', firstLoadSynch: 'resourceModelSource']
     }
     @Override
     List<Property> getProjectConfigProperties() {
@@ -78,13 +85,22 @@ class NodeService implements InitializingBean, RundeckProjectConfigurable,IProje
                     description 'Delay in seconds, at least 30.\n\nRefresh results after this many seconds have passed. Results may be this many seconds old. Cache refreshes no more frequently that 30s.'
                     required(false)
                     defaultValue '30'
+                }.build(),
+                PropertyBuilder.builder().with {
+                    booleanType  'firstLoadSynch'
+                    title 'Synchronous First Load'
+                    description 'When the cache is empty, forces the first load to happen synchronously to prevent empty node results.'
+                    required(false)
+                    defaultValue 'true'
                 }.build()
         ]
     }
+    String serviceName= ServiceNameConstants.ResourceModelSource
+    String propertyPrefix = FrameworkProject.RESOURCES_SOURCE_PROP_PREFIX
 
     @Override
     Map<String, String> getPropertiesMapping() {
-        ['delay': PROJECT_NODECACHE_DELAY, 'enabled': PROJECT_NODECACHE_ENABLED]
+        ['delay': PROJECT_NODECACHE_DELAY, 'enabled': PROJECT_NODECACHE_ENABLED, 'firstLoadSynch': PROJECT_NODECACHE_FIRSTLOAD_SYNCH]
     }
 
     //basic creation, created via spec string in afterPropertiesSet()
@@ -144,6 +160,12 @@ class NodeService implements InitializingBean, RundeckProjectConfigurable,IProje
         return globalEnabled && projectNodeCacheEnabledConfig(projectConfig)
     }
 
+    boolean isCacheFirstloadSynchEnabled(IRundeckProjectConfig projectConfig, Boolean defval) {
+        projectConfig.hasProperty(PROJECT_NODECACHE_FIRSTLOAD_SYNCH) ?
+        Boolean.parseBoolean(projectConfig.getProperty(PROJECT_NODECACHE_FIRSTLOAD_SYNCH)) :
+        defval
+    }
+
     boolean needsReload(String project, CachedProjectNodes oldNodes) {
         def framework = frameworkService.getRundeckFramework()
         def rdprojectconfig = framework.projectManager.loadProjectConfig(project)
@@ -192,17 +214,30 @@ class NodeService implements InitializingBean, RundeckProjectConfigurable,IProje
      */
     CachedProjectNodes loadNodes(final String project, final CachedProjectNodes oldValue) {
         def framework = frameworkService.getRundeckFramework()
-        def rdprojectconfig = framework.getProjectManager().loadProjectConfig(project)
+        def rdprojectconfig = framework.getFrameworkProjectMgr().loadProjectConfig(project)
         def enabled = isCacheEnabled(rdprojectconfig)
         log.debug("loadNodes for ${project}... (cacheEnabled: ${enabled})")
 
-        /**
-         * base node support object for loading all node data synchronously
-         */
+        def resourceModelSourceService = framework.getResourceModelSourceService()
+
         def nodeSupport = new ProjectNodeSupport(
-                rdprojectconfig,
-                framework.getResourceFormatGeneratorService(),
-                framework.getResourceModelSourceService()
+            rdprojectconfig,
+            framework.getResourceFormatGeneratorService(),
+            resourceModelSourceService,
+            { String type, Properties config ->
+                //load via pluginService to enable app-level plugins
+                def retained = pluginService.retainPlugin(
+                        type,
+                        resourceModelSourceService
+                )
+                if (null != retained) {
+                    return retained.convert(
+                            ResourceModelSourceService.factoryConverter(config)
+                    )
+                } else {
+                    return null
+                }
+            }
         )
 
 
@@ -254,7 +289,9 @@ class NodeService implements InitializingBean, RundeckProjectConfigurable,IProje
         /**
          * asynchronous first load, unless disabled by configuration
          */
-        def asynchronousFirstLoad = configurationService.getBoolean('nodeService.nodeCache.firstLoadAsynch', true)
+        def asynchronousFirstLoad = configurationService.getBoolean('nodeService.nodeCache.firstLoadAsynch', false)
+        //project config will override app config
+        asynchronousFirstLoad = !isCacheFirstloadSynchEnabled(rdprojectconfig, !asynchronousFirstLoad)
         def firstLoadInBg = null==oldValue && (preloadedNodes?.nodes?.size()>0 || asynchronousFirstLoad)
         if(null==oldValue && !firstLoadInBg){
             log.debug("Empty preload cache, loading nodes synchronously for $project ...")
@@ -282,10 +319,6 @@ class NodeService implements InitializingBean, RundeckProjectConfigurable,IProje
 
     @Override
     void refreshProjectNodes(final String name) {
-        expireProjectNodes(name)
-    }
-
-    def expireProjectNodes(String name){
         nodeCache.invalidate(name)
     }
 
@@ -295,7 +328,7 @@ class NodeService implements InitializingBean, RundeckProjectConfigurable,IProje
 
     IProjectNodes getNodes(final String name) {
         def framework = frameworkService.getRundeckFramework()
-        if (!framework.projectManager.existsFrameworkProject(name)) {
+        if (!framework.frameworkProjectMgr.existsFrameworkProject(name)) {
             throw new IllegalArgumentException("Project does not exist: " + name)
         }
         def result = nodeCache.get(name)

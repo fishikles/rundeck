@@ -1,4 +1,5 @@
 .*
+*.orig
 !.github
 !.gitignore
 *~
@@ -13,7 +14,9 @@
 **/*/build
 **/out
 **/*/out
+makeenv
 /artifacts
+/ci-resources
 /cobertura.ser
 /gradle-cache
 /rundeckapp/stacktrace.log
@@ -52,3 +55,4 @@ rundeckapp/env.bash
 rundeckapp/out
 rundeckapp/rundeck-runtime
 /rundeckapp/grails-app/assets/node_modules
+/rundeckapp/grails-app/assets/**/node_modules

@@ -34,6 +34,7 @@ import org.rundeck.storage.api.Resource
 import org.rundeck.storage.api.StorageException
 import rundeck.Project
 import spock.lang.Specification
+import spock.lang.Unroll
 
 /**
  * See the API for {@link grails.test.mixin.services.ServiceUnitTestMixin} for usage instructions
@@ -90,13 +91,13 @@ class ProjectManagerServiceSpec extends Specification {
                 getPropertyLookup() >> PropertyLookup.create(properties)
             }
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         when:
         def result=service.getFrameworkProject('test1')
 
         then:
 
-        0*service.nodeService.getNodes('test1')
+        0*service.rundeckNodeService.getNodes('test1')
         result!=null
         'test1'==result.name
         'fwkvalue'==result.getProperty('fwkprop')
@@ -132,12 +133,12 @@ class ProjectManagerServiceSpec extends Specification {
                 getPropertyLookup() >> PropertyLookup.create(properties)
             }
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         when:
         def result=service.getFrameworkProject('test1')
 
         then:
-        0*service.nodeService.getNodes('test1')
+        0*service.rundeckNodeService.getNodes('test1')
         result!=null
         'test1'==result.name
         'fwkvalue'==result.getProperty('fwkprop')
@@ -191,12 +192,12 @@ class ProjectManagerServiceSpec extends Specification {
                 getPropertyLookup() >> PropertyLookup.create(properties)
             }
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         when:
         def result=service.getFrameworkProject('test1')
 
         then:
-        0*service.nodeService.getNodes('test1')
+        0*service.rundeckNodeService.getNodes('test1')
         result!=null
         'test1'==result.name
         'fwkvalue'==result.getProperty('fwkprop')
@@ -235,12 +236,12 @@ class ProjectManagerServiceSpec extends Specification {
                 getPropertyLookup() >> PropertyLookup.create(properties)
             }
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         when:
         def result=service.getFrameworkProject('test1')
 
         then:
-        0*service.nodeService.getNodes('test1')
+        0*service.rundeckNodeService.getNodes('test1')
         result!=null
         'test1'==result.name
         'fwkvalue'==result.getProperty('fwkprop')
@@ -279,7 +280,7 @@ class ProjectManagerServiceSpec extends Specification {
                 getPropertyLookup() >> PropertyLookup.create(properties)
             }
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
 
         when:
@@ -288,11 +289,11 @@ class ProjectManagerServiceSpec extends Specification {
 
         then:
         1*service.projectCache.invalidate('test1')
-        1*service.nodeService.expireProjectNodes('test1')
-        0*service.nodeService.getNodes('test1')
+        1*service.rundeckNodeService.refreshProjectNodes('test1')
+        0*service.rundeckNodeService.getNodes('test1')
 
         result.name=='test1'
-        2==result.getProjectProperties().size()
+        (2+ProjectManagerService.DEFAULT_PROJ_PROPS.size())==result.getProjectProperties().size()
         'test1'==result.getProjectProperties().get('project.name')
         'def'==result.getProjectProperties().get('abc')
 
@@ -344,7 +345,7 @@ class ProjectManagerServiceSpec extends Specification {
             }
         }
 
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
         when:
 
@@ -352,12 +353,12 @@ class ProjectManagerServiceSpec extends Specification {
 
         then:
         1*service.projectCache.invalidate('test1')
-        1*service.nodeService.expireProjectNodes('test1')
-        0*service.nodeService.getNodes('test1')
+        1*service.rundeckNodeService.refreshProjectNodes('test1')
+        0*service.rundeckNodeService.getNodes('test1')
 
-        0*service.nodeService._(*_)
+        0*service.rundeckNodeService._(*_)
         result.name=='test1'
-        2==result.getProjectProperties().size()
+        (2+ProjectManagerService.DEFAULT_PROJ_PROPS.size())==result.getProjectProperties().size()
         'test1'==result.getProjectProperties().get('project.name')
         'def'==result.getProjectProperties().get('abc')
 
@@ -371,7 +372,7 @@ class ProjectManagerServiceSpec extends Specification {
         service.removeFrameworkProject('test1')
 
         then:
-        0*service.nodeService._(*_)
+        0*service.rundeckNodeService._(*_)
         IllegalArgumentException e = thrown()
         e.message.contains('does not exist')
     }
@@ -386,7 +387,7 @@ class ProjectManagerServiceSpec extends Specification {
             1*hasDirectory({it.path=="projects/test1"}) >> true
             1*listDirectory({it.path=="projects/test1"}) >> []
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
         when:
 
@@ -394,7 +395,7 @@ class ProjectManagerServiceSpec extends Specification {
 
         then:
         1*service.projectCache.invalidate('test1')
-        1*service.nodeService.expireProjectNodes('test1')
+        1*service.rundeckNodeService.refreshProjectNodes('test1')
         null==Project.findByName('test1')
 
     }
@@ -435,7 +436,7 @@ class ProjectManagerServiceSpec extends Specification {
             }
         }
 
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
 
         when:
@@ -443,13 +444,64 @@ class ProjectManagerServiceSpec extends Specification {
 
         then:
         1*service.projectCache.invalidate('test1')
-        1*service.nodeService.expireProjectNodes('test1')
+        1*service.rundeckNodeService.refreshProjectNodes('test1')
 
-        res!=null
-        res.config.size()==3
-        'def'==res.config['abc']
-        'ghi'==res.config['def']
-        'test1'==res.config['project.name']
+        res != null
+        res.config.size() == 3
+        'def' == res.config['abc']
+        'ghi' == res.config['def']
+        'test1' == res.config['project.name']
+    }
+
+    @Unroll
+    void "merge project properties without existing resource"() {
+        setup:
+        Properties props1 = new Properties()
+        props1['def'] = 'ghi'
+        new Project(name: 'test1').save()
+        service.storage = Stub(StorageTree) {
+            hasResource("projects/test1/etc/project.properties") >> false
+            updateResource(
+                "projects/test1/etc/project.properties", { ResourceMeta rm ->
+                def tprops = new Properties()
+                tprops.load(rm.inputStream)
+                rm.meta.size() == 1 &&
+                rm.meta[StorageUtil.RES_META_RUNDECK_CONTENT_TYPE] ==
+                ProjectManagerService.MIME_TYPE_PROJECT_PROPERTIES &&
+                tprops['def'] ==
+                'ghi'
+            }
+            ) >> Stub(Resource) {
+                getContents() >> Stub(ResourceMeta) {
+                    getInputStream() >> new ByteArrayInputStream(
+                        (
+                            '#' + ProjectManagerService.MIME_TYPE_PROJECT_PROPERTIES +
+                            '\ndef=ghi'
+                        ).bytes
+                    )
+                }
+            }
+        }
+
+        service.rundeckNodeService = Mock(NodeService)
+        service.projectCache = Mock(LoadingCache)
+
+        when:
+        def res = service.mergeProjectProperties('test1', props1, removePrefixes as Set)
+
+        then:
+        1 * service.projectCache.invalidate('test1')
+        1 * service.rundeckNodeService.refreshProjectNodes('test1')
+
+        res != null
+        res.config.size() == 2
+        'ghi' == res.config['def']
+        'test1' == res.config['project.name']
+
+        where:
+        removePrefixes       | _
+        ['resources.source'] | _
+        []                   | _
     }
     void "set project properties internal"(){
         setup:
@@ -474,7 +526,7 @@ class ProjectManagerServiceSpec extends Specification {
             }
         }
 
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
 
         when:
@@ -483,7 +535,7 @@ class ProjectManagerServiceSpec extends Specification {
         then:
 
         1*service.projectCache.invalidate('test1')
-        1*service.nodeService.expireProjectNodes('test1')
+        1*service.rundeckNodeService.refreshProjectNodes('test1')
         res!=null
         res.config.size()==2
         null==res.config['abc']
@@ -516,7 +568,7 @@ class ProjectManagerServiceSpec extends Specification {
         }
 
 
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
         when:
         def res=service.setProjectProperties('test1',props1)
@@ -524,7 +576,7 @@ class ProjectManagerServiceSpec extends Specification {
         then:
 
         1*service.projectCache.invalidate('test1')
-        1*service.nodeService.expireProjectNodes('test1')
+        1*service.rundeckNodeService.refreshProjectNodes('test1')
         res!=null
         res.config.size()==2
         null==res.config['abc']
@@ -678,6 +730,18 @@ class ProjectManagerServiceSpec extends Specification {
         expect:
         service.listProjectDirPaths("test1","my-dir")==['my-dir/file1','my-dir/file2','my-dir/etc/']
         service.listProjectDirPaths("test1","not-my-resource")==[]
+    }
+
+    void "list project dir paths when tree throws exception"() {
+        given:
+        service.storage = Stub(StorageTree) {
+            hasDirectory("projects/test1/my-dir") >> false
+            listDirectory("projects/test1/my-dir") >> {
+                throw StorageException.listException(PathUtil.asPath('projects/test1/my-dir'), 'dne')
+            }
+        }
+        expect:
+        service.listProjectDirPaths("test1", "my-dir") == []
     }
     void "storage list paths regex"(){
         given:
@@ -1169,14 +1233,14 @@ class ProjectManagerServiceSpec extends Specification {
                 getPropertyLookup() >> PropertyLookup.create(properties)
             }
         }
-        service.nodeService=Mock(NodeService)
+        service.rundeckNodeService=Mock(NodeService)
         service.projectCache=Mock(LoadingCache)
         when:
         service.importProjectsFromProjectManager(pm1)
 
         then:
-        1*service.nodeService.expireProjectNodes('abc')
-        0*service.nodeService.getNodes('abc')
+        1*service.rundeckNodeService.refreshProjectNodes('abc')
+        0*service.rundeckNodeService.getNodes('abc')
         1*service.projectCache.invalidate('abc')
         Project.findByName('abc')!=null
     }

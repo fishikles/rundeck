@@ -36,12 +36,16 @@ LOGFILE=$RDECK_BASE/var/log/service.log
 mkdir -p $(dirname $LOGFILE)
 FWKPROPS=$HOME/etc/framework.properties
 mkdir -p $(dirname $FWKPROPS)
-export RUNDECK_PORT=4440
-export RUNDECK_URL=http://$RUNDECK_NODE:$RUNDECK_PORT
-if [ -n "$SETUP_SSL" ] ; then
-  export RUNDECK_PORT=4443
-  export RUNDECK_URL=https://$RUNDECK_NODE:$RUNDECK_PORT
-fi
+
+export RUNDECK_PORT=${RUNDECK_PORT:-4440}
+export RUNDECK_URL=${RUNDECK_URL:-http://$RUNDECK_NODE:$RUNDECK_PORT}
+
+
+# if [ -n "$SETUP_SSL" ] ; then
+#   export RUNDECK_PORT=4443
+#   export RUNDECK_URL=https://$RUNDECK_NODE:$RUNDECK_PORT
+# fi
+
 cat > $FWKPROPS <<END
 framework.server.name = $RUNDECK_NODE
 framework.server.hostname = $RUNDECK_NODE
@@ -75,6 +79,8 @@ rundeck.tokens.file=$HOME/etc/tokens.properties
 
 # force UTF-8
 #framework.remote.charset.default=UTF-8
+
+rundeck.enable.ref.stats=true
 END
 
 cat > $HOME/etc/profile <<END
@@ -98,7 +104,7 @@ done
 export CLI_CP
 
 # force UTF-8 default encoding
-export RDECK_JVM="-Dfile.encoding=UTF-8"
+export RDECK_JVM="-Dfile.encoding=UTF-8 -Drundeck.bootstrap.build.info=true $RDECK_JVM_OPTS"
 END
 
 # prevent CLI tool warning
@@ -241,6 +247,34 @@ if [ -n "$SETUP_SSL" ] ; then
     setup_ssl $RDECK_BASE
 fi
 
+cat > $HOME/server/config/rundeck-config.properties <<END
+loglevel.default=INFO
+rdeck.base=/home/rundeck
+
+#rss.enabled if set to true enables RSS feeds that are public (non-authenticated)
+rss.enabled=false
+server.address=0.0.0.0
+grails.serverURL=${RUNDECK_URL}
+dataSource.dbCreate = update
+dataSource.url = jdbc:h2:file:/home/rundeck/server/data/grailsdb;MVCC=true
+dataSource.properties.removeAbandoned=true
+dataSource.properties.removeAbandonedTimeout=5
+
+# Pre Auth mode settings
+rundeck.security.authorization.preauthenticated.enabled=false
+rundeck.security.authorization.preauthenticated.attributeName=REMOTE_USER_GROUPS
+rundeck.security.authorization.preauthenticated.delimiter=,
+# Header from which to obtain user name
+rundeck.security.authorization.preauthenticated.userNameHeader=X-Forwarded-Uuid
+# Header from which to obtain list of roles
+rundeck.security.authorization.preauthenticated.userRolesHeader=X-Forwarded-Roles
+# Redirect to upstream logout url
+rundeck.security.authorization.preauthenticated.redirectLogout=false
+rundeck.security.authorization.preauthenticated.redirectUrl=/oauth2/sign_in
+
+rundeck.log4j.config.file=/home/rundeck/server/config/log4j.properties
+END
+
 if [ -n "$NODE_CACHE_FIRST_LOAD_SYNCH" ] ; then
   cat - >>$RDECK_BASE/server/config/rundeck-config.properties <<END
 rundeck.nodeService.nodeCache.firstLoadAsynch=false
@@ -275,6 +309,13 @@ do
     elif ! grep "${SUCCESS_MSG}" "$LOGFILE" ; then
       echo "Still working. hang on..."; # output a progress character.
     else  break; # found successful startup message.
+    fi
+    if [ -n "$STARTUP_FAILURE_MSG" ] ; then
+      if grep "${STARTUP_FAILURE_MSG}" "$LOGFILE" ; then
+        >&2 grep "${STARTUP_FAILURE_MSG}" "$LOGFILE"
+        echo >&2 "FAIL: found startup failure message: ${STARTUP_FAILURE_MSG}"
+        exit 1
+      fi
     fi
     (( count += 1 ))  ; # increment attempts counter.
     (( count == MAX_ATTEMPTS )) && {

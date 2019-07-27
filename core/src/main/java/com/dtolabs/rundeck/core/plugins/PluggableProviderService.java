@@ -17,13 +17,21 @@
 package com.dtolabs.rundeck.core.plugins;
 
 import com.dtolabs.rundeck.core.common.ProviderService;
+import com.dtolabs.rundeck.core.execution.service.ProviderLoaderException;
 import com.dtolabs.rundeck.core.plugins.configuration.DescribableService;
+import com.dtolabs.rundeck.core.utils.Converter;
 
 /**
- * ${CLASSNAME} is ...
- * Created by greg
- * Date: 4/12/13
- * Time: 5:46 PM
+ * A pluggable provider service
  */
 public interface PluggableProviderService<T> extends ProviderService<T>, PluggableService<T>, DescribableService {
+
+    /**
+     * @return Create an adapted form of this service given a converter.
+     * @param <X> provider type
+     * @param converter converter
+     */
+    default  <X> PluggableProviderService<X> adapter(final Converter<T, X> converter) {
+        return AdapterService.adaptFor(this, converter);
+    }
 }
